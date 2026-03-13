@@ -7,9 +7,7 @@ import {
 } from 'lucide-react';
 import { analyzeLog } from '../utils/logAnalyzer';
 import { saveRecentLog, saveGarageLog, getAnnotations, saveAnnotations } from '../utils/storage';
-import { trackEvent, trackError } from '../utils/telemetry';
-import { saveRecentLog, getAnnotations, saveAnnotations } from '../utils/storage';
-import { trackEvent, trackUploadFailure, trackParserMismatch, trackPerformanceIssue, trackExportFailure } from '../utils/telemetry';
+import { trackEvent, trackError, trackUploadFailure, trackParserMismatch, trackPerformanceIssue, trackExportFailure } from '../utils/telemetry';
 import { hapticSuccess, hapticWarning, hapticError } from '../utils/haptics';
 import { mergeCompareChartData } from '../utils/logCompare';
 import {
