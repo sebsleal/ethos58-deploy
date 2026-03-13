@@ -1,5 +1,21 @@
 [
   {
+    "version": "2.1.0",
+    "date": "2026-03-13",
+    "title": "Garage, Diagnostics, Fuel Planner + Telemetry",
+    "changes": [
+      { "type": "new", "platform": "both", "text": "Added Log Garage with backup export/import, richer history storage, and CSV reopen support" },
+      { "type": "improved", "platform": "both", "text": "Expanded Log Analyzer compare mode into a fuller comparison workflow for side-by-side review" },
+      { "type": "new", "platform": "both", "text": "Added batch log import and dashboard trend baselines for reviewing multiple sessions over time" },
+      { "type": "new", "platform": "both", "text": "Analyzer now surfaces diagnostic issue cards to highlight likely problem areas faster" },
+      { "type": "new", "platform": "both", "text": "Calculator now includes Fuel Planner tools like pump calibration, station presets, cost optimization, and trip planning" },
+      { "type": "improved", "platform": "both", "text": "Trimmed unfinished Settings sections and removed unused persisted options for a cleaner surface" },
+      { "type": "improved", "platform": "both", "text": "Added a more resilient telemetry pipeline with server-side ingest for client events and error reporting" },
+      { "type": "improved", "platform": "both", "text": "Expanded automated coverage for settings behavior, compare logic, and CSV viewer parsing" },
+      { "type": "fixed", "platform": "both", "text": "Removed duplicate Log Analyzer imports that could break builds after the feature merges" }
+    ]
+  },
+  {
     "version": "2.0.6",
     "date": "2026-03-13",
     "title": "Dashboard Refresh Stability",
