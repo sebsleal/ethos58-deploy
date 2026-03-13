@@ -62,6 +62,11 @@ const Calculator = () => {
   const [refuelGallons, setRefuelGallons] = useState(5.0);
   const [refuelPumpEthanol, setRefuelPumpEthanol] = useState(0);
   const [refuelResult, setRefuelResult] = useState(null);
+  const [refuelAddUnit, setRefuelAddUnit] = useState(() => {
+    const settings = getSettings();
+    if (settings.refuelAddUnit === 'L' || settings.refuelAddUnit === 'gal') return settings.refuelAddUnit;
+    return settings.units === 'Metric' ? 'L' : 'gal';
+  });
 
   // fuel planner state
   const [calibrationInput, setCalibrationInput] = useState(plannerDefaults.calibrationReadings || '');
@@ -148,9 +153,23 @@ const Calculator = () => {
     return gallons;
   };
 
+  const toDisplayRefuelVolume = (gallons) => {
+    if (gallons === '' || gallons === null || gallons === undefined) return '';
+    if (refuelAddUnit === 'L') return roundTo(Number(gallons) * LITERS_PER_GALLON, 2);
+    return gallons;
+  };
+
+  const fromDisplayRefuelVolume = (value) => {
+    const parsed = parseFloat(value);
+    if (Number.isNaN(parsed)) return '';
+    if (refuelAddUnit === 'L') return parsed / LITERS_PER_GALLON;
+    return parsed;
+  };
+
   const volumeLabel = volumeUnit === 'L' ? 'L' : 'gal';
   const tankCapacityLabel = tankCapacityUnit === 'L' ? 'L' : 'gal';
   const resultVolumeLabel = resultVolumeUnit === 'L' ? 'L' : 'gal';
+  const refuelAddLabel = refuelAddUnit === 'L' ? 'L' : 'gal';
 
   const handleVolumeUnitChange = (unit) => {
     setVolumeUnit(unit);
@@ -164,6 +183,11 @@ const Calculator = () => {
 
   const handleTankCapacityUnitChange = (unit) => {
     setTankCapacityUnit(unit);
+  };
+
+  const handleRefuelAddUnitChange = (unit) => {
+    setRefuelAddUnit(unit);
+    saveSetting('refuelAddUnit', unit);
   };
 
   const handleChange = (e) => {
@@ -474,7 +498,11 @@ const Calculator = () => {
           handleChange={handleChange}
           refuelGallons={refuelGallons}
           setRefuelGallons={setRefuelGallons}
-          fromDisplayVolume={fromDisplayVolume}
+          refuelAddLabel={refuelAddLabel}
+          refuelAddUnit={refuelAddUnit}
+          handleRefuelAddUnitChange={handleRefuelAddUnitChange}
+          toDisplayRefuelVolume={toDisplayRefuelVolume}
+          fromDisplayRefuelVolume={fromDisplayRefuelVolume}
           refuelPumpEthanol={refuelPumpEthanol}
           setRefuelPumpEthanol={setRefuelPumpEthanol}
           calcRefuel={calcRefuel}
@@ -561,7 +589,26 @@ const Calculator = () => {
           </div>
 
           <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-white/5 rounded-2xl p-6 shadow-sm dark:shadow-none space-y-5">
-            <h2 className="text-base font-bold text-slate-900 dark:text-gray-100">Fuel Planner Output</h2>
+            <div className="flex items-center justify-between gap-4">
+              <h2 className="text-base font-bold text-slate-900 dark:text-gray-100">Fuel Planner Output</h2>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-gray-400">Result Unit</span>
+                <div className="flex rounded-lg border border-slate-200 dark:border-white/10 overflow-hidden">
+                  <button
+                    onClick={() => handleResultVolumeUnitChange('gal')}
+                    className={`px-3 py-1.5 text-xs font-bold transition-colors ${resultVolumeUnit === 'gal' ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-white dark:bg-zinc-950 text-slate-500 dark:text-gray-400 hover:bg-slate-50'}`}
+                  >
+                    Gallons
+                  </button>
+                  <button
+                    onClick={() => handleResultVolumeUnitChange('L')}
+                    className={`px-3 py-1.5 text-xs font-bold transition-colors ${resultVolumeUnit === 'L' ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-white dark:bg-zinc-950 text-slate-500 dark:text-gray-400 hover:bg-slate-50'}`}
+                  >
+                    Litres
+                  </button>
+                </div>
+              </div>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
               <div className="rounded-xl border border-slate-200 dark:border-white/10 px-3 py-2 text-slate-600 dark:text-gray-300">Current tank: {toDisplayVolume(formData.currentFuel)} {volumeLabel} at E{formData.currentE}</div>
               <div className="rounded-xl border border-slate-200 dark:border-white/10 px-3 py-2 text-slate-600 dark:text-gray-300">Target / tank size: E{formData.targetE} in a {toDisplayTankCapacity(formData.tankSize)} {tankCapacityLabel} tank</div>
@@ -575,7 +622,7 @@ const Calculator = () => {
                   {fillCostResult.map((item, idx) => (
                     <div key={item.name} className={`rounded-xl border px-3 py-2 ${idx === 0 ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-500/5' : 'border-slate-200 dark:border-white/10'}`}>
                       <div className="flex justify-between text-sm"><span>{item.name}</span><span className="font-bold">${item.totalCost}</span></div>
-                      <p className="text-xs text-slate-500 dark:text-gray-400">E85 {item.gallons_of_e85_to_add} gal + Pump {item.gallons_of_93_to_add} gal</p>
+                      <p className="text-xs text-slate-500 dark:text-gray-400">E85 {formatResultVolume(item.gallons_of_e85_to_add)} {resultVolumeLabel} + Pump {formatResultVolume(item.gallons_of_93_to_add)} {resultVolumeLabel}</p>
                     </div>
                   ))}
                 </div>
@@ -593,7 +640,7 @@ const Calculator = () => {
                     </div>
                   ))}
                 </div>
-                {tripSummary && <p className="mt-3 text-sm font-semibold text-brand-500">Total E85 needed: {tripSummary.totalE85} {resultVolumeLabel}</p>}
+                {tripSummary && <p className="mt-3 text-sm font-semibold text-brand-500">Total E85 needed: {formatResultVolume(tripSummary.totalE85)} {resultVolumeLabel}</p>}
               </div>
             )}
 
@@ -699,7 +746,7 @@ const BlendPane = ({ precisionMode, setPrecisionMode, pumpOctane, setPumpOctane,
   </div>
 );
 
-const RefuelPane = ({ volumeLabel, formData, toDisplayVolume, handleChange, refuelGallons, setRefuelGallons, fromDisplayVolume, refuelPumpEthanol, setRefuelPumpEthanol, calcRefuel, refuelResult }) => (
+const RefuelPane = ({ volumeLabel, formData, toDisplayVolume, handleChange, refuelGallons, setRefuelGallons, refuelAddLabel, refuelAddUnit, handleRefuelAddUnitChange, toDisplayRefuelVolume, fromDisplayRefuelVolume, refuelPumpEthanol, setRefuelPumpEthanol, calcRefuel, refuelResult }) => (
   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
     <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-white/5 rounded-2xl p-6 shadow-sm dark:shadow-none">
       <h2 className="text-base font-bold text-slate-900 dark:text-gray-100 mb-4 border-b border-slate-100 dark:border-white/5 pb-4">Refuel Planner</h2>
@@ -708,9 +755,27 @@ const RefuelPane = ({ volumeLabel, formData, toDisplayVolume, handleChange, refu
         <InputGroup label={`Current Fuel in Tank (${volumeLabel})`} name="currentFuel" value={toDisplayVolume(formData.currentFuel)} onChange={handleChange} step="0.1" />
         <InputGroup label="Current Ethanol %" name="currentE" value={formData.currentE} onChange={handleChange} step="1" />
         <div>
-          <label className="block text-xs font-bold text-slate-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide">{volumeLabel === 'L' ? 'Litres Being Added' : 'Gallons Being Added'}</label>
-          <input type="number" value={toDisplayVolume(refuelGallons)} onChange={e => {
-            const next = fromDisplayVolume(e.target.value);
+          <div className="flex items-center justify-between gap-3 mb-1.5">
+            <label className="block text-xs font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wide">{refuelAddUnit === 'L' ? 'Litres Being Added' : 'Gallons Being Added'}</label>
+            <div className="flex rounded-lg border border-slate-200 dark:border-white/10 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => handleRefuelAddUnitChange('gal')}
+                className={`px-3 py-1 text-[11px] font-bold transition-colors ${refuelAddUnit === 'gal' ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-white dark:bg-zinc-950 text-slate-500 dark:text-gray-400 hover:bg-slate-50'}`}
+              >
+                Gallons
+              </button>
+              <button
+                type="button"
+                onClick={() => handleRefuelAddUnitChange('L')}
+                className={`px-3 py-1 text-[11px] font-bold transition-colors ${refuelAddUnit === 'L' ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-white dark:bg-zinc-950 text-slate-500 dark:text-gray-400 hover:bg-slate-50'}`}
+              >
+                Litres
+              </button>
+            </div>
+          </div>
+          <input type="number" value={toDisplayRefuelVolume(refuelGallons)} onChange={e => {
+            const next = fromDisplayRefuelVolume(e.target.value);
             setRefuelGallons(next === '' ? 0 : next);
           }} step="0.5" className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-white/10 focus:border-brand-400 rounded-xl px-4 py-2.5 text-slate-900 dark:text-gray-100 text-sm outline-none transition-all" />
         </div>
@@ -735,7 +800,7 @@ const RefuelPane = ({ volumeLabel, formData, toDisplayVolume, handleChange, refu
             <p className="text-4xl font-black text-brand-600 dark:text-brand-400">E{refuelResult}</p>
             <p className="text-xs text-slate-400 dark:text-gray-500 mt-1">resulting blend</p>
           </div>
-          <p className="text-sm text-slate-500 dark:text-gray-400 text-center">Adding {toDisplayVolume(refuelGallons)} {volumeLabel} of E{refuelPumpEthanol} to {toDisplayVolume(formData.currentFuel)} {volumeLabel} of E{formData.currentE}</p>
+          <p className="text-sm text-slate-500 dark:text-gray-400 text-center">Adding {toDisplayRefuelVolume(refuelGallons)} {refuelAddLabel} of E{refuelPumpEthanol} to {toDisplayVolume(formData.currentFuel)} {volumeLabel} of E{formData.currentE}</p>
           <a href="https://www.e85prices.com" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 mt-6 py-2 px-4 rounded-xl border border-slate-200 dark:border-white/5 text-slate-500 dark:text-gray-400 hover:text-brand-500 hover:border-brand-300 transition-colors text-xs font-medium"><MapPin size={13} /> Find E85 stations near me</a>
         </div>
       ) : (
