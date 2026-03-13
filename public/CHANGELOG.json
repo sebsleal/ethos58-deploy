@@ -1,5 +1,14 @@
 [
   {
+    "version": "2.1.2",
+    "date": "2026-03-13",
+    "title": "Calculator Result Unit Controls",
+    "changes": [
+      { "type": "improved", "platform": "both", "text": "Fuel Planner output now includes its own gallons/litres result-unit toggle so cost and trip recommendations are easier to read in your preferred unit" },
+      { "type": "new", "platform": "both", "text": "Refuel Planner now lets you enter the amount being added in gallons or litres independently from the rest of the calculator" }
+    ]
+  },
+  {
     "version": "2.1.1",
     "date": "2026-03-13",
     "title": "Fuel Planner Clarity + Tank Capacity Units",
