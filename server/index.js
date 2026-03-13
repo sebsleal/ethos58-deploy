@@ -3,6 +3,7 @@
  *
  * POST /api/calculate-blend  – ethanol blend math
  * POST /api/analyze-log      – bootmod3 / MHD CSV datalog analysis
+ * POST /api/telemetry       – batched client telemetry ingest
  */
 
 import express from 'express';
@@ -11,6 +12,7 @@ import {
   uploadCsv,
   calculateBlendHandler,
   analyzeLogHandler,
+  telemetryIngestHandler,
   globalErrorHandler,
 } from './routeHandlers.js';
 
@@ -31,6 +33,7 @@ app.post('/api/calculate-blend', calculateBlendHandler);
 // ─── POST /api/analyze-log ───────────────────────────────────────────────────
 
 app.post('/api/analyze-log', uploadCsv.single('file'), analyzeLogHandler);
+app.post('/api/telemetry', telemetryIngestHandler);
 
 // ─── Global error handler ────────────────────────────────────────────────────
 

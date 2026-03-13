@@ -163,3 +163,87 @@ export function reverseCalculateBlend({ currentE, currentGallons, addGallons, pu
 
   return round(((currentEthanolGal + addedEthanolGal) / total) * 100, 1);
 }
+
+/**
+ * Average pump ethanol readings from a tester (simple calibration helper).
+ */
+export function calibratePumpEthanol(readings = []) {
+  const valid = readings
+    .map(value => parseFloat(value))
+    .filter(value => Number.isFinite(value) && value >= 0 && value <= 100);
+
+  if (valid.length === 0) return null;
+  return round(valid.reduce((sum, value) => sum + value, 0) / valid.length, 1);
+}
+
+/**
+ * Estimate blend cost for a full-tank target using station prices.
+ */
+export function estimateBlendFillCost({
+  currentGallons,
+  currentE,
+  targetE,
+  tankSize,
+  pumpEthanol,
+  e85Price,
+  pumpPrice,
+}) {
+  const blend = calculateBlend({
+    current_gallons: currentGallons,
+    current_ethanol_percent: currentE,
+    target_ethanol_percent: targetE,
+    tank_size: tankSize,
+    pump_ethanol_percent: pumpEthanol,
+  });
+
+  const e85Cost = (blend.gallons_of_e85_to_add || 0) * (parseFloat(e85Price) || 0);
+  const pumpCost = (blend.gallons_of_93_to_add || 0) * (parseFloat(pumpPrice) || 0);
+
+  return {
+    ...blend,
+    e85Cost: round(e85Cost, 2),
+    pumpCost: round(pumpCost, 2),
+    totalCost: round(e85Cost + pumpCost, 2),
+  };
+}
+
+/**
+ * Plan E85 additions for upcoming tanks.
+ */
+export function planEthanolOverTanks({
+  tanks,
+  startGallons,
+  startE,
+  tankSize,
+  targetE,
+  pumpEthanol,
+}) {
+  const totalTanks = Math.max(1, parseInt(tanks, 10) || 1);
+  const plan = [];
+
+  let currentGallons = parseFloat(startGallons) || 0;
+  let currentE = parseFloat(startE) || 0;
+
+  for (let i = 0; i < totalTanks; i += 1) {
+    const blend = calculateBlend({
+      current_gallons: currentGallons,
+      current_ethanol_percent: currentE,
+      target_ethanol_percent: targetE,
+      tank_size: tankSize,
+      pump_ethanol_percent: pumpEthanol,
+    });
+
+    plan.push({
+      tank: i + 1,
+      e85Gallons: blend.gallons_of_e85_to_add,
+      pumpGallons: blend.gallons_of_93_to_add,
+      resultingE: blend.resulting_percent,
+    });
+
+    // After this tank cycle, user returns near their starting fill level.
+    currentGallons = parseFloat(startGallons) || 0;
+    currentE = blend.resulting_percent;
+  }
+
+  return plan;
+}
