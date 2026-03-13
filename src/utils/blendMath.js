@@ -134,3 +134,32 @@ export function calculateBlend({
 function round(value, decimals) {
   return parseFloat(value.toFixed(decimals));
 }
+
+/**
+ * Compute the resulting octane after blending E85 + pump gas.
+ * E85 is typically rated ~105 AKI. Pump gas is the user-selected octane.
+ */
+export function calculateResultingOctane({ e85Gallons, pumpGallons, pumpOctane, e85Octane = 105 }) {
+  const total = (e85Gallons || 0) + (pumpGallons || 0);
+  if (total === 0) return null;
+  return round((e85Gallons * e85Octane + pumpGallons * pumpOctane) / total, 1);
+}
+
+/**
+ * Reverse blend calculation: given how many gallons the user is about to add
+ * at a known pump ethanol %, what will the resulting blend be?
+ */
+export function reverseCalculateBlend({ currentE, currentGallons, addGallons, pumpEthanol }) {
+  const g  = parseFloat(currentGallons) || 0;
+  const ag = parseFloat(addGallons)     || 0;
+  const ce = parseFloat(currentE)       || 0;
+  const pe = parseFloat(pumpEthanol)    || 0;
+
+  const total = g + ag;
+  if (total === 0) return null;
+
+  const currentEthanolGal = g * (ce / 100);
+  const addedEthanolGal   = ag * (pe / 100);
+
+  return round(((currentEthanolGal + addedEthanolGal) / total) * 100, 1);
+}

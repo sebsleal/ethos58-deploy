@@ -1,16 +1,48 @@
-# React + Vite
+# Ethos85
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Ethos85 is a React + Vite app (web + Capacitor iOS) with an Express API for ethanol blend calculations and BMW datalog analysis.
 
-Currently, two official plugins are available:
+## Run locally
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+```bash
+npm install
+npm run dev:all
+```
 
-## React Compiler
+- Web UI: `http://localhost:5173`
+- API: `http://localhost:3001`
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Architecture
 
-## Expanding the ESLint configuration
+### Shared business logic
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+- Blend math lives in `src/utils/blendMath.js`.
+- Log analysis logic lives in `src/utils/logAnalyzer.js`.
+
+### CSV parser runtime split (intentional)
+
+- Browser parser: `src/utils/csvParser.js`
+  - No Node dependencies.
+  - Used by the web app and worker.
+- Server parser: `server/utils/csvParser.js`
+  - Uses `csv-parse/sync` for robust server-side parsing.
+  - Used by API handlers before calling `analyzeParsedLog`.
+
+Do not cross-import these parser modules across runtimes.
+
+### API handlers
+
+- Shared request handlers and validation are in `server/routeHandlers.js`.
+- Reused by:
+  - `server/index.js` (local API server)
+  - `api/*.js` (Vercel/serverless entrypoints)
+
+## Tests
+
+```bash
+npm test
+```
+
+Coverage currently focuses on core correctness for:
+- `calculateBlend`
+- `analyzeLog` / `analyzeParsedLog`

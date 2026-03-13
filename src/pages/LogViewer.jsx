@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { MonitorPlay, UploadCloud, Search, Eye, EyeOff, FileText, RotateCcw, BarChart2, XCircle, Droplet } from 'lucide-react';
+import { getSettings } from '../utils/storage';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Brush,
@@ -122,6 +123,16 @@ function fmt(v) {
 }
 
 const AUTO_KEYWORDS = ['rpm', 'load', 'afr', 'lambda', 'boost', 'iat', 'hpfp', 'timing correction', 'knock'];
+const DOWNSAMPLING_MAP = {
+  'Fast (800 pts)': 800,
+  'High Quality (1600 pts)': 1600,
+  'Original (All Data)': Number.POSITIVE_INFINITY,
+};
+const LINE_WIDTH_MAP = {
+  'Thin (1px)': 1,
+  'Normal (1.5px)': 1.5,
+  'Thick (2px)': 2,
+};
 
 // ── Custom tooltip ────────────────────────────────────────────────────────────
 function CustomTooltip({ active, payload }) {
@@ -150,6 +161,9 @@ const LogViewer = () => {
   const [selected, setSelected] = useState(new Set());
   const [dragActive, setDragActive] = useState(false);
   const [search, setSearch] = useState('');
+  const settings = getSettings();
+  const maxPoints = DOWNSAMPLING_MAP[settings.downsampling] ?? 800;
+  const lineWidth = LINE_WIDTH_MAP[settings.lineThickness] ?? 1.5;
 
   const processFile = useCallback((file) => {
     const reader = new FileReader();
@@ -160,7 +174,7 @@ const LogViewer = () => {
       const numericChannels = detectNumericChannels(headers, rows);
       const timeCol = detectTimeColumn(headers);
       const stats = computeStats(numericChannels, rows);
-      const sampled = downsample(rows, 800);
+      const sampled = Number.isFinite(maxPoints) ? downsample(rows, maxPoints) : rows;
 
       const colors = {};
       numericChannels.forEach((ch, i) => { colors[ch] = paletteColor(i); });
@@ -177,7 +191,7 @@ const LogViewer = () => {
       setSearch('');
     };
     reader.readAsText(file);
-  }, []);
+  }, [maxPoints]);
 
   const handleDrag = (e) => {
     e.preventDefault(); e.stopPropagation();
@@ -467,7 +481,7 @@ const LogViewer = () => {
                       type="monotone"
                       dataKey={`${ch}_norm`}
                       stroke={colors[ch]}
-                      strokeWidth={1.5}
+                      strokeWidth={lineWidth}
                       dot={false}
                       isAnimationActive={false}
                       connectNulls={false}

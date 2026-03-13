@@ -6,9 +6,9 @@
 const COLUMN_MAP = {
   time:        ['time', 'timestamp', 'elapsed', 'log time'],
   rpm:         ['rpm', 'engine speed', 'engine_speed'],
-  load:        ['load_%', 'load (%)', 'load(%)', 'load', 'engine load', 'throttle position'],
+  load:        ['load_%', 'load (%)', 'load(%)', 'load act. (rel.)', 'load target (rel.)', 'load', 'engine load', 'throttle position'],
   afr:         ['air fuel ratio', 'air_fuel_ratio', 'afr', 'lambda'],
-  boost:       ['boost pre throttle', 'boost pre-throttle', 'pre throttle boost', 'manifold pressure pre throttle',
+  boost:       ['boost (pre-throttle)', 'boost pre throttle', 'boost pre-throttle', 'pre throttle boost', 'manifold pressure pre throttle',
                 'hp boost pre throttle', 'boost pressure pre throttle',
                 'boost act', 'boost mean', 'manifold absolute pressure', 'boost pressure', 'boost_pressure',
                 'boost (psi)', 'boost_psi', 'boost', 'manifold pressure', 'map'],
@@ -17,17 +17,30 @@ const COLUMN_MAP = {
                 '^iat'],
   hpfp:        ['hp fuel pressure actual', 'hpfp actual', 'hpfp_actual', 'high pressure fuel pump actual', 'hpfp act',
                  'hpfp (psi)', 'hpfp_psi', 'hpfp', 'high pressure fuel pump', 'fuel pressure actual', 'fuel_pressure_actual'],
-  hpfp_target: ['hpfp target', 'hpfp_target', 'hp fuel pressure target', 'fuel pressure target', 'hpfp req',
+  hpfp_target: ['hpfp (target)', 'hpfp target', 'hpfp_target', 'hp fuel pressure target', 'fuel pressure target', 'hpfp req',
                 'hpfp setpoint', 'hpfp_setpoint', 'hp fuel pressure setpoint', 'fuel pressure setpoint',
                 'hpfp desired', 'hp fuel pressure desired', 'fuel pressure desired',
                 'hpfp sp', 'hpfp set', 'high pressure fuel pump target', 'high pressure fuel pump setpoint'],
   afr_target:  ['afr target', 'afr_target', 'air fuel ratio target'],
-  pedal:       ['pedal', 'accel pedal', 'accelerator pedal', 'accel_pedal', 'pedal position'],
+  pedal:       ['pedal', 'accel. pedal', 'accel pedal', 'accelerator pedal', 'accel_pedal', 'pedal position'],
   throttle:    ['throttle', 'throttle position', 'throttle_position', 'throttle angle', 'throttle_angle'],
+  ltft:        ['long term fuel trim', 'ltft', 'long_term_fuel_trim', 'fuel trim long term', 'fuel trim lt'],
+  stft:        ['short term fuel trim', 'stft', 'short_term_fuel_trim', 'fuel trim short term', 'fuel trim st'],
 };
 
 const TIMING_KEYWORDS  = ['timing cor', 'timing_cor', 'ign cor', 'ign_cor', 'ignition cor', 'knock'];
 const CYLINDER_KEYWORDS = ['cyl', 'cylinder', 'cyl_'];
+
+// Signature columns unique to each format
+const BM3_SIGNATURES  = [
+  'bootmod3',
+  '(bm3)',
+  'boost (pre-throttle)',
+  'hpfp act.',
+  'hpfp (target)',
+  'ignition cyl',
+];
+const MHD_SIGNATURES  = ['mhd', 'boost act', 'hpfp act', 'ltft', 'stft', 'wgdc', 'boost mean'];
 
 function parseRow(line) {
   const result = [];
@@ -107,8 +120,26 @@ function detectBoostUnit(columnName, sampleValues = []) {
   return 'psi';
 }
 
+/**
+ * Detect log format from headers.
+ * Returns 'BM3', 'MHD', or 'Unknown'.
+ */
+export function detectLogFormat(headers) {
+  const lowers = headers.map(h => h.toLowerCase());
+  if (lowers.some(h => h.includes('bootmod3') || h.includes('(bm3)'))) return 'BM3';
+  if (lowers.some(h => h.includes('mhd'))) return 'MHD';
+  const bm3Matches = BM3_SIGNATURES.filter(sig => lowers.some(h => h.includes(sig))).length;
+  const mhdMatches = MHD_SIGNATURES.filter(sig => lowers.some(h => h.includes(sig))).length;
+  if (bm3Matches > mhdMatches) return 'BM3';
+  if (mhdMatches > bm3Matches) return 'MHD';
+  if (bm3Matches > 0) return 'BM3';
+  if (mhdMatches > 0) return 'MHD';
+  return 'Unknown';
+}
+
 export function parseCsv(csvText) {
-  const { rows, headers } = parseCsvText(csvText);
+  const normalizedCsv = typeof csvText === 'string' ? csvText : String(csvText ?? '');
+  const { rows, headers } = parseCsvText(normalizedCsv);
 
   const columns = {};
   for (const [key, keywords] of Object.entries(COLUMN_MAP)) {
@@ -124,8 +155,9 @@ export function parseCsv(csvText) {
     ? rows.slice(0, 50).map(r => parseFloat(r[columns.boost])).filter(v => !isNaN(v))
     : [];
   const boostUnit = detectBoostUnit(columns.boost, boostSamples);
+  const logFormat = detectLogFormat(headers);
 
-  return { rows, columns, timingColumns, boostUnit };
+  return { rows, columns, timingColumns, boostUnit, logFormat };
 }
 
 export function num(row, col) {

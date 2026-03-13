@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react';
-import { ArrowRight, Activity, Droplet, FileText, Settings2, Zap, MonitorPlay, CheckCircle, AlertTriangle, XCircle, Trash2 } from 'lucide-react';
+import { useRef, useState, useEffect, useMemo } from 'react';
+import { ArrowRight, Activity, Droplet, FileText, Settings2, Zap, MonitorPlay, CheckCircle, AlertTriangle, Trash2, Heart, TrendingUp } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { getRecentLogs, clearRecentLogs, getActiveBlend, clearActiveBlend, getLogResult } from '../utils/storage';
+import { hapticLight } from '../utils/haptics';
 
 const STATUS_ICON = {
   Safe:    <CheckCircle size={14} className="text-green-400" />,
@@ -20,14 +22,202 @@ function formatDate(iso) {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+function formatShortDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function scoreColor(score) {
+  if (score === null || score === undefined) return '#71717a';
+  if (score >= 80) return '#22c55e';
+  if (score >= 55) return '#eab308';
+  return '#ef4444';
+}
+
+function scoreLabel(score) {
+  if (score === null || score === undefined) return '—';
+  if (score >= 80) return 'Good';
+  if (score >= 55) return 'Caution';
+  return 'Risk';
+}
+
+// SVG ring progress component
+function HealthRing({ score, size = 80 }) {
+  const r = (size - 10) / 2;
+  const circ = 2 * Math.PI * r;
+  const pct = score === null ? 0 : Math.max(0, Math.min(100, score));
+  const dash = (pct / 100) * circ;
+  const color = scoreColor(score);
+
+  return (
+    <svg width={size} height={size} className="rotate-[-90deg]">
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="currentColor" strokeWidth={8}
+        className="text-gray-200 dark:text-zinc-800" />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={8}
+        strokeDasharray={`${dash} ${circ}`} strokeLinecap="round"
+        style={{ transition: 'stroke-dasharray 0.6s ease' }} />
+    </svg>
+  );
+}
+
+function HealthScorePanel({ log }) {
+  const score = log?.healthScore ?? null;
+  const color = scoreColor(score);
+
+  return (
+    <div className="flex items-center gap-4">
+      <div className="relative shrink-0">
+        <HealthRing score={score} size={80} />
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="text-lg font-bold" style={{ color }}>{score ?? '—'}</span>
+        </div>
+      </div>
+      <div>
+        <p className="text-sm font-semibold text-gray-900 dark:text-white">{scoreLabel(score)}</p>
+        {log ? (
+          <>
+            <p className="text-xs text-gray-500 dark:text-zinc-400 truncate max-w-[140px]">{log.filename}</p>
+            <p className="text-xs text-gray-400 dark:text-zinc-500 mt-0.5">{formatDate(log.date)}</p>
+          </>
+        ) : (
+          <p className="text-xs text-gray-500 dark:text-zinc-400 mt-0.5">No logs analyzed yet</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const CustomTooltip = ({ active, payload, label }) => {
+  if (!active || !payload?.length) return null;
+  const d = payload[0]?.payload;
+  return (
+    <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-xs shadow-lg">
+      <p className="text-gray-500 dark:text-zinc-400 mb-1">{label}</p>
+      <p className="font-semibold" style={{ color: scoreColor(d.healthScore) }}>
+        Score {d.healthScore ?? '—'} — {scoreLabel(d.healthScore)}
+      </p>
+      {d.timingPull !== null && d.timingPull !== undefined && (
+        <p className="text-gray-400 dark:text-zinc-500">Max pull {d.timingPull}°</p>
+      )}
+    </div>
+  );
+};
+
 const Dashboard = () => {
   const [recentLogs, setRecentLogs] = useState([]);
   const [activeBlend, setActiveBlend] = useState(null);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const startTouchYRef = useRef(null);
+  const pullDistanceRef = useRef(0); // mirrors pullDistance for use in non-reactive closures
+  const refreshingRef = useRef(false);
+  const refreshTimeoutRef = useRef(null);
+  const rootRef = useRef(null);
   const navigate = useNavigate();
 
-  useEffect(() => {
+  const loadDashboardData = () => {
     setRecentLogs(getRecentLogs());
     setActiveBlend(getActiveBlend());
+  };
+
+  useEffect(() => {
+    loadDashboardData();
+  }, []);
+
+  const getScrollContainer = () => {
+    return rootRef.current?.closest('[data-scroll-container]') ?? null;
+  };
+
+  const finishRefresh = () => {
+    if (refreshTimeoutRef.current !== null) {
+      window.clearTimeout(refreshTimeoutRef.current);
+    }
+    refreshTimeoutRef.current = window.setTimeout(() => {
+      refreshingRef.current = false;
+      setPullDistance(0);
+      setRefreshing(false);
+      refreshTimeoutRef.current = null;
+    }, 350);
+  };
+
+  const triggerRefresh = () => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    setRefreshing(true);
+    void hapticLight();
+    loadDashboardData();
+    finishRefresh();
+  };
+
+  useEffect(() => {
+    return () => {
+      if (refreshTimeoutRef.current !== null) {
+        window.clearTimeout(refreshTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Non-passive touch listeners so preventDefault() works on iOS WebView
+  // (React's onTouchMove is passive by default, which silently ignores preventDefault)
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+
+    const onStart = (e) => {
+      if (refreshingRef.current) {
+        startTouchYRef.current = null;
+        return;
+      }
+      const scrollEl = getScrollContainer();
+      if (!scrollEl || scrollEl.scrollTop > 0) { startTouchYRef.current = null; return; }
+      startTouchYRef.current = e.touches[0].clientY;
+    };
+
+    const onMove = (e) => {
+      if (refreshingRef.current) return;
+      if (startTouchYRef.current === null) return;
+      const scrollEl = getScrollContainer();
+      if (!scrollEl || scrollEl.scrollTop > 0) return;
+      const delta = e.touches[0].clientY - startTouchYRef.current;
+      if (delta <= 0) { pullDistanceRef.current = 0; setPullDistance(0); return; }
+      e.preventDefault(); // stops native overscroll competing on iOS
+      const clamped = Math.min(delta, 120);
+      pullDistanceRef.current = clamped;
+      setPullDistance(clamped);
+    };
+
+    const onEnd = () => {
+      if (refreshingRef.current) {
+        startTouchYRef.current = null;
+        pullDistanceRef.current = 0;
+        setPullDistance(0);
+        return;
+      }
+      if (startTouchYRef.current === null) return;
+      startTouchYRef.current = null;
+      const dist = pullDistanceRef.current;
+      pullDistanceRef.current = 0;
+      setPullDistance(0);
+      if (dist >= 70) triggerRefresh();
+    };
+
+    const onCancel = () => {
+      startTouchYRef.current = null;
+      pullDistanceRef.current = 0;
+      setPullDistance(0);
+    };
+
+    el.addEventListener('touchstart', onStart, { passive: true });
+    el.addEventListener('touchmove', onMove, { passive: false });
+    el.addEventListener('touchend', onEnd, { passive: true });
+    el.addEventListener('touchcancel', onCancel, { passive: true });
+    return () => {
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+      el.removeEventListener('touchcancel', onCancel);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleClearLogs = () => {
@@ -40,8 +230,34 @@ const Dashboard = () => {
     setActiveBlend(null);
   };
 
+  const mostRecentLog = recentLogs[0] || null;
+
+  // Build timeline data — oldest first for chart
+  const timelineData = useMemo(() => {
+    return [...recentLogs]
+      .filter(l => l.healthScore !== null && l.healthScore !== undefined)
+      .reverse()
+      .map(l => ({
+        date: formatShortDate(l.date),
+        healthScore: l.healthScore,
+        timingPull: l.timingPull,
+        filename: l.filename,
+      }));
+  }, [recentLogs]);
+
   return (
-    <div className="space-y-8 animate-fade-in">
+    <div
+      ref={rootRef}
+      className="space-y-8 animate-fade-in relative"
+      style={{ transform: pullDistance > 0 ? `translateY(${Math.min(pullDistance, 80) / 3}px)` : 'translateY(0)', transition: refreshing ? 'transform 0.2s ease' : 'none' }}
+    >
+      {(pullDistance > 0 || refreshing) && (
+        <div className="absolute left-1/2 -translate-x-1/2 -top-2 z-10">
+          <div className="px-3 py-1 rounded-full bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 text-[11px] font-semibold text-gray-500 dark:text-zinc-300 shadow-sm">
+            {refreshing ? 'Refreshing logs…' : pullDistance >= 70 ? 'Release to refresh' : 'Pull to refresh'}
+          </div>
+        </div>
+      )}
       <header className="mb-8">
         <h1 className="text-2xl font-semibold tracking-tight text-gray-900 dark:text-white">Dashboard</h1>
         <p className="text-sm text-gray-500 dark:text-zinc-400 mt-1">Overview of your analysis tools and recent logs.</p>
@@ -60,6 +276,40 @@ const Dashboard = () => {
               <p className="text-xs mt-1">Analyze a BM3 or MHD CSV</p>
             </Link>
           </SectionPanel>
+
+          {/* Health Score Timeline */}
+          {timelineData.length >= 2 && (
+            <SectionPanel title="Tune Health Timeline" icon={TrendingUp}>
+              <div className="mt-3 h-36">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={timelineData} margin={{ top: 4, right: 8, left: -24, bottom: 0 }}>
+                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#71717a' }} tickLine={false} axisLine={false} />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#71717a' }} tickLine={false} axisLine={false} />
+                    <Tooltip content={<CustomTooltip />} />
+                    <ReferenceLine y={80} stroke="#22c55e" strokeDasharray="3 3" strokeOpacity={0.4} />
+                    <ReferenceLine y={55} stroke="#eab308" strokeDasharray="3 3" strokeOpacity={0.4} />
+                    <Line
+                      type="monotone"
+                      dataKey="healthScore"
+                      stroke="#6366f1"
+                      strokeWidth={2}
+                      dot={(props) => {
+                        const { cx, cy, payload } = props;
+                        return (
+                          <circle key={payload.date} cx={cx} cy={cy} r={3}
+                            fill={scoreColor(payload.healthScore)} stroke="none" />
+                        );
+                      }}
+                      activeDot={{ r: 5 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              <p className="text-[10px] text-gray-400 dark:text-zinc-600 mt-1 text-right">
+                Green ≥ 80 · Yellow ≥ 55 · Red &lt; 55
+              </p>
+            </SectionPanel>
+          )}
 
           {/* Recently Analyzed Logs */}
           <SectionPanel
@@ -94,6 +344,11 @@ const Dashboard = () => {
                       <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{log.filename}</p>
                       <p className="text-xs text-gray-400 dark:text-zinc-500">{log.engine} · E{log.ethanol} · {formatDate(log.date)}</p>
                     </div>
+                    {log.healthScore !== null && log.healthScore !== undefined && (
+                      <span className="text-xs font-bold shrink-0" style={{ color: scoreColor(log.healthScore) }}>
+                        {log.healthScore}
+                      </span>
+                    )}
                     {log.afr && <p className="text-xs text-gray-400 dark:text-zinc-500 shrink-0">AFR {log.afr}</p>}
                     <ArrowRight size={14} className="text-gray-300 dark:text-zinc-600 group-hover:text-brand-400 transition-colors shrink-0" />
                   </button>
@@ -106,6 +361,27 @@ const Dashboard = () => {
 
         {/* Right Column */}
         <div className="lg:col-span-4 flex flex-col gap-6">
+
+          {/* Tune Health Score */}
+          <SectionPanel title="Tune Health" icon={Heart}>
+            <div className="mt-2 mb-2">
+              <HealthScorePanel log={mostRecentLog} />
+              {mostRecentLog?.timingPull !== null && mostRecentLog?.timingPull !== undefined && (
+                <div className="mt-3 pt-3 border-t border-gray-100 dark:border-zinc-800 grid grid-cols-2 gap-2 text-xs">
+                  <div className="bg-gray-50 dark:bg-zinc-900/40 border border-gray-100 dark:border-zinc-800 rounded-lg p-2 text-center">
+                    <p className="font-bold text-gray-900 dark:text-white">{mostRecentLog.timingPull}°</p>
+                    <p className="text-gray-500 dark:text-zinc-500">Max Timing Pull</p>
+                  </div>
+                  {mostRecentLog.afr && (
+                    <div className="bg-gray-50 dark:bg-zinc-900/40 border border-gray-100 dark:border-zinc-800 rounded-lg p-2 text-center">
+                      <p className="font-bold text-gray-900 dark:text-white">{mostRecentLog.afr}</p>
+                      <p className="text-gray-500 dark:text-zinc-500">Min AFR</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </SectionPanel>
 
           {/* Active Blend */}
           <SectionPanel

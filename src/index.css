@@ -7,10 +7,21 @@
 @layer base {
   :root {
     color-scheme: light;
+    --app-bottom-inset: env(safe-area-inset-bottom);
   }
 
   :root.dark {
     color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  html {
+    background-color: #f9fafb;
   }
 
   body {
@@ -21,8 +32,27 @@
     @apply bg-gray-50 text-gray-900;
   }
 
+  /* Prevent iOS/WKWebView auto-zoom on focused form controls.
+     Tailwind text utilities can override element styles, so use !important. */
+  @supports (-webkit-touch-callout: none) {
+    input,
+    textarea,
+    select {
+      font-size: 16px !important;
+    }
+  }
+
   .dark body {
     @apply bg-[#09090B] text-gray-100;
+  }
+
+  :root.dark {
+    background-color: #09090b;
+  }
+
+  [data-scroll-container] {
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
   }
 
   ::-webkit-scrollbar {

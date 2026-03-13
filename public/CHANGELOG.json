@@ -1,0 +1,117 @@
+[
+  {
+    "version": "2.0.6",
+    "date": "2026-03-13",
+    "title": "Dashboard Refresh Stability",
+    "changes": [
+      { "type": "fixed", "platform": "ios", "text": "Dashboard pull-to-refresh now stops cleanly instead of getting stuck showing the refresh banner" },
+      { "type": "fixed", "platform": "ios", "text": "Added stronger in-flight refresh guards so a single pull gesture cannot retrigger overlapping refresh cycles" },
+      { "type": "improved", "platform": "ios", "text": "Touch cancel handling now resets pull distance state correctly during interrupted refresh gestures" }
+    ]
+  },
+  {
+    "version": "2.0.5",
+    "date": "2026-03-13",
+    "title": "Status Bar Contrast + Smoother Tab Switching",
+    "changes": [
+      { "type": "fixed", "platform": "ios", "text": "Corrected status bar style mapping so light mode uses dark time/battery text and dark mode uses light text" },
+      { "type": "improved", "platform": "both", "text": "Switched to a hybrid loading strategy: core tabs load eagerly while heavier analysis pages stay lazy" },
+      { "type": "improved", "platform": "both", "text": "Added idle-time preloading for heavy route chunks to reduce first-switch lag between tabs/screens" },
+      { "type": "improved", "platform": "ios", "text": "Updated Capacitor StatusBar/Keyboard default style config to follow system appearance at startup" }
+    ]
+  },
+  {
+    "version": "2.0.4",
+    "date": "2026-03-13",
+    "title": "Input/Zoom Stability + Startup Performance",
+    "changes": [
+      { "type": "fixed", "platform": "ios", "text": "Prevented unwanted zoom while typing by enforcing iOS-safe form input sizing and tightening touch zoom handling behavior" },
+      { "type": "fixed", "platform": "both", "text": "Calculator numeric parsing now preserves valid 0 values instead of coercing them into blank fields" },
+      { "type": "fixed", "platform": "ios", "text": "Hardened native async listener setup/cleanup paths to avoid duplicate listeners during remounts" },
+      { "type": "improved", "platform": "both", "text": "Route screens and overlays now lazy-load to reduce initial bundle work and improve startup responsiveness" },
+      { "type": "fixed", "platform": "both", "text": "Mobile menu trigger is now a semantic button for better interaction reliability and accessibility" }
+    ]
+  },
+  {
+    "version": "2.0.3",
+    "date": "2026-03-13",
+    "title": "Blend Unit Flexibility + iOS Visual Fixes",
+    "changes": [
+      { "type": "new", "platform": "both", "text": "Blend Calculator now supports independent result units, so you can input tank values in litres but view fill amounts in gallons (or vice versa)" },
+      { "type": "fixed", "platform": "ios", "text": "Status bar style mapping corrected so light-theme iOS status text/icons render dark for better readability" },
+      { "type": "fixed", "platform": "ios", "text": "Onboarding modal now opens centered on iPhone instead of being anchored to the bottom edge" },
+      { "type": "fixed", "platform": "ios", "text": "Keyboard appearance and resize behavior improved to prevent the black overlay/gap effect while typing in calculator fields" },
+      { "type": "improved", "platform": "both", "text": "App shell now uses dynamic viewport sizing and explicit root background handling for cleaner mobile rendering" }
+    ]
+  },
+  {
+    "version": "2.0.2",
+    "date": "2026-03-13",
+    "title": "Native iOS UX + Platform Polish",
+    "changes": [
+      { "type": "fixed", "platform": "ios", "text": "Added full safe-area handling for top and bottom insets so mobile nav/content no longer overlap the home indicator" },
+      { "type": "improved", "platform": "ios", "text": "Status bar now syncs to light/dark theme and uses transparent overlay behavior" },
+      { "type": "fixed", "platform": "ios", "text": "Applied 16px form control font-size to prevent iOS input auto-zoom on focus" },
+      { "type": "new", "platform": "ios", "text": "PNG export now opens the native share sheet (Save Image, AirDrop, etc.) on iOS" },
+      { "type": "improved", "platform": "ios", "text": "Calculator now listens for keyboard events and scrolls active fields into view" },
+      { "type": "new", "platform": "ios", "text": "Dashboard now supports pull-to-refresh gesture with haptic feedback" },
+      { "type": "improved", "platform": "ios", "text": "Configured Capacitor splash screen and status bar plugin settings for branded launch behavior" },
+      { "type": "improved", "platform": "web", "text": "Enabled momentum/touch scrolling behavior for long scroll containers" },
+      { "type": "new", "platform": "both", "text": "Added offline-awareness banner using Capacitor Network (with web fallback)" },
+      { "type": "new", "platform": "ios", "text": "Onboarding and changelog modals now support drag-down-to-dismiss gesture" },
+      { "type": "new", "platform": "both", "text": "Update Log now includes platform filter tabs: All, Web, and iOS" }
+    ]
+  },
+  {
+    "version": "2.0.1",
+    "date": "2026-03-13",
+    "title": "HPFP Accuracy + Update Log Access",
+    "changes": [
+      { "type": "fixed", "platform": "both", "text": "HPFP crash detection now prioritizes high pedal/throttle demand and compares HPFP target vs actual more accurately" },
+      { "type": "fixed", "platform": "both", "text": "Tune health score now penalizes severe HPFP crashes correctly instead of showing inflated \"Good\" scores" },
+      { "type": "fixed", "platform": "both", "text": "BM3 vs MHD auto-detection improved for BM3 headers like bootmod3/(BM3), Pre-Throttle Boost, and HPFP Target variants" },
+      { "type": "improved", "platform": "both", "text": "Recent logs now recalculate health scores from saved analyses to avoid stale score values" },
+      { "type": "new", "platform": "both", "text": "New Settings > Update Log tab lets you open changelog history anytime after onboarding" }
+    ]
+  },
+  {
+    "version": "2.0.0",
+    "date": "2025-01-15",
+    "title": "Major Update",
+    "changes": [
+      { "type": "new", "platform": "both", "text": "Saved blend profiles — store and reload your favourite tank setups" },
+      { "type": "new", "platform": "both", "text": "Refuel Planner mode in the Calculator" },
+      { "type": "new", "platform": "both", "text": "Estimated octane output shown after every blend calculation" },
+      { "type": "new", "platform": "both", "text": "Knock event scatter chart — RPM vs load with severity coloring" },
+      { "type": "new", "platform": "both", "text": "LTFT/STFT fuel trim analysis by RPM zone" },
+      { "type": "new", "platform": "both", "text": "Multi-log compare overlay in Log Analyzer" },
+      { "type": "new", "platform": "both", "text": "Chart annotations — tap to pin notes at any time index" },
+      { "type": "new", "platform": "both", "text": "PNG export for any chart view" },
+      { "type": "new", "platform": "both", "text": "Auto-detect BM3 vs MHD log format with badge" },
+      { "type": "new", "platform": "both", "text": "Tune health score (0–100) per log, shown on Dashboard" },
+      { "type": "new", "platform": "both", "text": "Log health timeline chart on Dashboard" },
+      { "type": "improved", "platform": "ios", "text": "Haptic feedback on iOS for calculation results and risk alerts" },
+      { "type": "improved", "platform": "web", "text": "Station finder link to nearest E85 pump" }
+    ]
+  },
+  {
+    "version": "1.3.0",
+    "date": "2024-11-01",
+    "title": "Log Analyzer",
+    "changes": [
+      { "type": "new", "platform": "both", "text": "Full log analyzer with AFR, boost, HPFP, and IAT gauges" },
+      { "type": "new", "platform": "both", "text": "Timing correction per-cylinder heatmap" },
+      { "type": "improved", "platform": "both", "text": "Dashboard redesign with active blend card" }
+    ]
+  },
+  {
+    "version": "1.0.0",
+    "date": "2024-09-10",
+    "title": "Initial Release",
+    "changes": [
+      { "type": "new", "platform": "both", "text": "E85 blend calculator with precision mode" },
+      { "type": "new", "platform": "both", "text": "Dark mode support" },
+      { "type": "new", "platform": "ios", "text": "iOS app via Capacitor" }
+    ]
+  }
+]

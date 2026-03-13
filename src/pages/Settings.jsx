@@ -1,10 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { Settings, User, Bell, Shield, Key, Database, Smartphone, Info } from 'lucide-react';
-import { getSettings, saveSetting } from '../utils/storage';
+import React, { Suspense, lazy, useState, useEffect } from 'react';
+import { Settings, User, Bell, Shield, Database, Info, Sparkles } from 'lucide-react';
+import { getSettings, saveSetting, getLastSeenVersion } from '../utils/storage';
+import { CURRENT_VERSION } from '../constants/version';
+
+const Changelog = lazy(() => import('../components/Changelog'));
 
 const SettingsPage = () => {
   const [activeTab, setActiveTab] = useState('account');
   const [s, setS] = useState(getSettings);
+  const [showChangelog, setShowChangelog] = useState(false);
+  const [lastSeenVersion, setLastSeenVersion] = useState(getLastSeenVersion());
 
   // Apply theme to DOM whenever it changes
   useEffect(() => {
@@ -26,6 +31,7 @@ const SettingsPage = () => {
   const tabs = [
     { id: 'account',      label: 'Account Profile', icon: User },
     { id: 'preferences',  label: 'Preferences',     icon: Settings },
+    { id: 'updates',      label: 'Update Log',      icon: Sparkles },
     { id: 'notifications', label: 'Notifications',  icon: Bell },
     { id: 'security',     label: 'Security',        icon: Shield },
     { id: 'integrations', label: 'Integrations',    icon: Database },
@@ -268,7 +274,32 @@ const SettingsPage = () => {
             </div>
           )}
 
-          {activeTab !== 'account' && activeTab !== 'preferences' && (
+          {activeTab === 'updates' && (
+            <div className="space-y-6 animate-fade-in">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Update Log</h2>
+                <p className="text-sm text-gray-400 dark:text-gray-400 mt-1">View all product updates anytime.</p>
+              </div>
+              <div className="bg-gray-50/50 dark:bg-surface-300/30 border border-gray-200 dark:border-white/5 rounded-xl p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600 dark:text-gray-300">Current app version</span>
+                  <span className="text-sm font-bold text-gray-900 dark:text-gray-100">{CURRENT_VERSION}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600 dark:text-gray-300">Last seen changelog</span>
+                  <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">{lastSeenVersion || 'Never opened'}</span>
+                </div>
+                <button
+                  onClick={() => setShowChangelog(true)}
+                  className="w-full py-2.5 bg-brand-500 hover:bg-brand-400 text-white rounded-lg text-sm font-semibold transition-colors"
+                >
+                  Open Update Log
+                </button>
+              </div>
+            </div>
+          )}
+
+          {activeTab !== 'account' && activeTab !== 'preferences' && activeTab !== 'updates' && (
             <div className="h-full flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 py-12">
               <Settings size={48} className="opacity-20 mb-4" />
               <p className="text-sm font-medium text-gray-400 dark:text-gray-400">Settings for {activeTab} coming soon.</p>
@@ -277,6 +308,18 @@ const SettingsPage = () => {
 
         </div>
       </div>
+
+      {showChangelog && (
+        <Suspense fallback={null}>
+          <Changelog
+            currentVersion={CURRENT_VERSION}
+            onClose={() => {
+              setShowChangelog(false);
+              setLastSeenVersion(getLastSeenVersion() || CURRENT_VERSION);
+            }}
+          />
+        </Suspense>
+      )}
     </div>
   );
 };

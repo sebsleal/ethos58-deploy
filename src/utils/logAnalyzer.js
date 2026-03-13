@@ -23,6 +23,90 @@
 
 import { parseCsv, num, lambdaToAfr } from './csvParser.js'; // browser-compatible
 
+// ─── Fuel Trim Analysis ───────────────────────────────────────────────────────
+
+function analyzeFuelTrims(rows, columns) {
+  const ltftCol = columns.ltft;
+  const stftCol = columns.stft;
+  const rpmCol  = columns.rpm;
+
+  if (!ltftCol && !stftCol) return null;
+
+  // Bucket rows by RPM: idle (<1500), cruise (1500–3500), high-load (>3500)
+  const buckets = { idle: [], cruise: [], highLoad: [] };
+
+  for (const row of rows) {
+    const ltft = ltftCol ? num(row, ltftCol) : NaN;
+    const stft = stftCol ? num(row, stftCol) : NaN;
+    const rpm  = rpmCol  ? num(row, rpmCol)  : NaN;
+
+    const combined = !isNaN(ltft) && !isNaN(stft) ? ltft + stft
+      : !isNaN(ltft) ? ltft
+      : !isNaN(stft) ? stft
+      : NaN;
+
+    if (isNaN(combined)) continue;
+
+    const bucket = isNaN(rpm) ? 'cruise'
+      : rpm < 1500  ? 'idle'
+      : rpm <= 3500 ? 'cruise'
+      : 'highLoad';
+
+    buckets[bucket].push(combined);
+  }
+
+  const avg = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+
+  const result = {
+    idle:     avg(buckets.idle)     !== null ? roundN(avg(buckets.idle),     1) : null,
+    cruise:   avg(buckets.cruise)   !== null ? roundN(avg(buckets.cruise),   1) : null,
+    highLoad: avg(buckets.highLoad) !== null ? roundN(avg(buckets.highLoad), 1) : null,
+    hasData:  true,
+  };
+
+  // Flag any bucket with avg trim deviation > ±5%
+  result.idleStatus     = result.idle     !== null ? (Math.abs(result.idle)     > 5 ? 'Caution' : 'Safe') : null;
+  result.cruiseStatus   = result.cruise   !== null ? (Math.abs(result.cruise)   > 5 ? 'Caution' : 'Safe') : null;
+  result.highLoadStatus = result.highLoad !== null ? (Math.abs(result.highLoad) > 5 ? 'Caution' : 'Safe') : null;
+
+  return result;
+}
+
+// ─── Knock Scatter Data ───────────────────────────────────────────────────────
+
+function buildKnockScatterData(rows, columns, timingColumns, boostUnit) {
+  if (timingColumns.length === 0) return [];
+
+  const rpmCol  = columns.rpm;
+  const loadCol = columns.load;
+
+  const points = [];
+
+  for (const row of rows) {
+    const rpm  = rpmCol  ? num(row, rpmCol)  : NaN;
+    const load = loadCol ? num(row, loadCol) : NaN;
+
+    if (isNaN(rpm) || isNaN(load)) continue;
+
+    let worstPull = 0;
+    for (const col of timingColumns) {
+      const val = num(row, col);
+      if (!isNaN(val) && val < worstPull) worstPull = val;
+    }
+
+    if (worstPull < -0.5) {
+      points.push({
+        rpm:      Math.round(rpm),
+        load:     roundN(load, 1),
+        pull:     roundN(worstPull, 2),
+        severity: worstPull <= -4 ? 'Risk' : worstPull <= -2 ? 'Caution' : 'Minor',
+      });
+    }
+  }
+
+  return points;
+}
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const LOAD_DEMAND = 50;   // % — minimum load for HPFP / AFR sampling
@@ -113,6 +197,16 @@ function isWot(load, boost, pedal, throttle) {
   if (!isNaN(t) && t < 30) return false;
 
   return l >= LOAD_WOT || b > BOOST_WOT;
+}
+
+function isHpfpCrashWindow(load, boost, pedal, throttle) {
+  const p = isNaN(pedal) ? NaN : pedal;
+  const t = isNaN(throttle) ? NaN : throttle;
+
+  if (!isDemand(load, boost, pedal, throttle)) return false;
+  if (!isNaN(p) && p >= 95) return true;
+  if (!isNaN(t) && t >= 85) return true;
+  return isWot(load, boost, pedal, throttle);
 }
 
 // ─── AFR Analysis ────────────────────────────────────────────────────────────
@@ -244,17 +338,37 @@ function analyzeHpfp(rows, columns, boostUnit) {
   }
 
   let maxDropPct = 0;
+  let worstCrash = null;
 
   if (targetCol) {
-    // Check the entire log for crashes, but only when target pressure is 
-    // high enough (e.g. > 1000 psi) to ignore normal idle fluctuations.
-    for (const row of rows) {
+    const crashRows = rows.filter(r => {
+      const load = num(r, loadCol);
+      const boost = normalizeBoostToPsi(num(r, boostCol), boostUnit);
+      const pedal = num(r, pedalCol);
+      const throttle = num(r, throttleCol);
+      const target = num(r, targetCol);
+      const actual = num(r, actualCol);
+      return isHpfpCrashWindow(load, boost, pedal, throttle) &&
+        !isNaN(target) && target > 1200 &&
+        !isNaN(actual) && actual > 0;
+    });
+
+    const sourceCrashRows = crashRows.length > 0 ? crashRows : rows;
+    for (const row of sourceCrashRows) {
       const a = num(row, actualCol);
       const t = num(row, targetCol);
-      if (isNaN(a) || isNaN(t) || t <= 1000 || a <= 0) continue;
+      if (isNaN(a) || isNaN(t) || t <= 1200 || a <= 0) continue;
 
       const dropPct = ((t - a) / t) * 100;
-      if (dropPct > maxDropPct) maxDropPct = dropPct;
+      if (dropPct > maxDropPct) {
+        maxDropPct = dropPct;
+        worstCrash = {
+          actual: a,
+          target: t,
+          pedal: num(row, pedalCol),
+          throttle: num(row, throttleCol),
+        };
+      }
     }
   } else {
     for (const a of actuals) {
@@ -265,19 +379,30 @@ function analyzeHpfp(rows, columns, boostUnit) {
 
   let status = 'Safe';
   let note = null;
+  const displayActual = worstCrash?.actual ?? avgActual;
+  const displayTarget = worstCrash?.target ?? avgTarget ?? peakActual;
 
   if (maxDropPct >= HPFP_DROP_RISK_PCT) {
     status = 'Risk';
-    note = `HPFP dropped ${roundN(maxDropPct, 1)}% below ${avgTarget ? 'target' : 'session peak'} during engine demand.`;
+    const pedalText = !isNaN(worstCrash?.pedal) ? ` at ${roundN(worstCrash.pedal, 0)}% pedal` : '';
+    note = worstCrash
+      ? `HPFP crash${pedalText}: target ${roundN(worstCrash.target, 0)} psi, actual ${roundN(worstCrash.actual, 0)} psi (${roundN(maxDropPct, 1)}% drop).`
+      : `HPFP dropped ${roundN(maxDropPct, 1)}% below ${avgTarget ? 'target' : 'session peak'} during engine demand.`;
   } else if (maxDropPct >= HPFP_DROP_CAUTION_PCT) {
     status = 'Caution';
-    note = `HPFP dipped ${roundN(maxDropPct, 1)}% under load — monitor closely.`;
+    const pedalText = !isNaN(worstCrash?.pedal) ? ` at ${roundN(worstCrash.pedal, 0)}% pedal` : '';
+    note = worstCrash
+      ? `HPFP dipped${pedalText}: target ${roundN(worstCrash.target, 0)} psi, actual ${roundN(worstCrash.actual, 0)} psi (${roundN(maxDropPct, 1)}% drop).`
+      : `HPFP dipped ${roundN(maxDropPct, 1)}% under load — monitor closely.`;
   }
 
   return {
-    actual: roundN(avgActual, 0),
-    target: avgTarget ? roundN(avgTarget, 0) : roundN(peakActual, 0),
+    actual: roundN(displayActual, 0),
+    target: roundN(displayTarget, 0),
     max_drop_pct: roundN(maxDropPct, 1),
+    worst_actual: worstCrash ? roundN(worstCrash.actual, 0) : null,
+    worst_target: worstCrash ? roundN(worstCrash.target, 0) : null,
+    worst_pedal: worstCrash && !isNaN(worstCrash.pedal) ? roundN(worstCrash.pedal, 0) : null,
     status,
     note,
   };
@@ -464,8 +589,12 @@ function buildChartData(rows, columns, isLambdaAfr, boostUnit, maxPoints = 150, 
       if (isNaN(a) || a <= 0) continue;
       let dropPct = 0;
       if (hpfpTargetCol) {
+        const load = num(rows[j], loadCol);
+        const pedal = num(rows[j], pedalCol);
+        const throttle = num(rows[j], throttleCol);
+        const bPsi = normalizeBoostToPsi(num(rows[j], boostCol), boostUnit);
         const t = num(rows[j], hpfpTargetCol);
-        if (!isNaN(t) && t > 1000) dropPct = ((t - a) / t) * 100;
+        if (!isNaN(t) && t > 1200 && isHpfpCrashWindow(load, bPsi, pedal, throttle)) dropPct = ((t - a) / t) * 100;
       } else if (hpfpPeak !== null) {
         dropPct = ((hpfpPeak - a) / hpfpPeak) * 100;
       }
@@ -572,8 +701,11 @@ function buildKeyPoints(afr, hpfp, iat, timing, carDetails) {
       const fuelNote = isHighEthanol
         ? `High-ethanol blends demand higher fuel flow — ensure your LPFP (low-side pump) is upgraded for E${ethanol}.`
         : `Check LPFP health, fuel filter condition, and HPFP cam lobe wear.`;
+      const crashContext = hpfp.worst_actual !== null && hpfp.worst_target !== null
+        ? `Worst event: ${hpfp.worst_actual} psi actual vs ${hpfp.worst_target} psi target. `
+        : '';
       points.push(
-        `HPFP averaged ${hpfp.actual} psi under load with a ${hpfp.max_drop_pct}% drop vs target. ${fuelNote}`
+        `${crashContext}HPFP dropped ${hpfp.max_drop_pct}% vs target under load. ${fuelNote}`
       );
     } else if (isHighEthanol) {
       points.push(
@@ -613,7 +745,12 @@ function buildKeyPoints(afr, hpfp, iat, timing, carDetails) {
  * @returns {object} Structured analysis result
  */
 export function analyzeLog(csvText, filename, carDetails = {}) {
-  const { rows, columns, timingColumns, boostUnit } = parseCsv(csvText);
+  const { rows, columns, timingColumns, boostUnit, logFormat } = parseCsv(csvText);
+  return analyzeParsedLog({ rows, columns, timingColumns, boostUnit, logFormat }, filename, carDetails);
+}
+
+export function analyzeParsedLog(parsed, filename, carDetails = {}) {
+  const { rows, columns, timingColumns, boostUnit, logFormat } = parsed;
 
   const sampleAfrs = rows
     .slice(0, 30)
@@ -627,6 +764,8 @@ export function analyzeLog(csvText, filename, carDetails = {}) {
   const hpfp = analyzeHpfp(rows, columns, boostUnit);
   const iat = analyzeIat(rows, columns, boostUnit);
   const timing = analyzeTimingCorrections(rows, timingColumns, columns, boostUnit);
+  const fuelTrims = analyzeFuelTrims(rows, columns);
+  const knockScatter = buildKnockScatterData(rows, columns, timingColumns, boostUnit);
   const overall = worstStatus(afr.status, hpfp.status, iat.status, timing.status);
 
   const keyPoints = buildKeyPoints(afr, hpfp, iat, timing, carDetails);
@@ -636,14 +775,17 @@ export function analyzeLog(csvText, filename, carDetails = {}) {
     row_count: rows.length,
     status: overall,
     carDetails,
+    logFormat: logFormat || 'Unknown',
     detectedColumns: { ...columns, boostUnit, timingColumns },
     metrics: {
       afr,
       hpfp,
       iat,
       timingCorrections: timing,
+      fuelTrims,
     },
     chartData: buildChartData(rows, columns, isLambdaAfr, boostUnit, 150, thresholds, timingColumns),
+    knockScatter,
     keyPoints,
     summary: {
       afr_status: afr.status,

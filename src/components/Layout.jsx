@@ -30,7 +30,7 @@ const Layout = ({ children }) => {
   ];
 
   return (
-    <div className="h-screen bg-gray-50 dark:bg-[#09090B] text-gray-900 dark:text-gray-100 flex flex-col md:flex-row overflow-hidden font-sans selection:bg-brand-500/20 selection:text-brand-700">
+    <div className="h-dvh bg-gray-50 dark:bg-[#09090B] text-gray-900 dark:text-gray-100 flex flex-col md:flex-row overflow-hidden font-sans selection:bg-brand-500/20 selection:text-brand-700">
 
       {/* ── Mobile layout (hidden on md+) ── */}
       <div className="md:hidden flex flex-col flex-1 overflow-hidden">
@@ -40,16 +40,24 @@ const Layout = ({ children }) => {
           className="flex-shrink-0 flex items-center justify-between px-6 pb-4 border-b border-gray-200 dark:border-zinc-800"
           style={{ paddingTop: 'max(1.5rem, env(safe-area-inset-top))' }}
         >
-          <div className="flex flex-col gap-1.5 w-6 cursor-pointer" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
+          <button
+            type="button"
+            aria-label={isMobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+            className="flex flex-col gap-1.5 w-6 cursor-pointer"
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+          >
             <div className="h-0.5 w-full bg-gray-900 dark:bg-white rounded-full"></div>
             <div className="h-0.5 w-full bg-gray-900 dark:bg-white rounded-full"></div>
             <div className="h-0.5 w-2/3 bg-gray-900 dark:bg-white rounded-full"></div>
-          </div>
+          </button>
         </div>
 
         {/* Mobile Nav (shown below header when open) */}
         {isMobileMenuOpen && (
-          <nav className="flex-shrink-0 flex flex-col px-6 py-4 border-b border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-[#09090B] gap-1.5">
+          <nav
+            className="flex-shrink-0 flex flex-col px-6 py-4 border-b border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-[#09090B] gap-1.5"
+            style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+          >
             {navItems.map((item) => {
               const Icon = item.icon;
               return (
@@ -84,7 +92,11 @@ const Layout = ({ children }) => {
         )}
 
         {/* Mobile Page Content */}
-        <main className="flex-1 overflow-y-auto">
+        <main
+          className="flex-1 overflow-y-auto"
+          data-scroll-container
+          style={{ paddingBottom: 'var(--app-bottom-inset, env(safe-area-inset-bottom))' }}
+        >
           <div className={cn(
             location.pathname === '/viewer' ? "p-0 h-full" : "px-4 pt-6 pb-12 max-w-6xl mx-auto"
           )}>
@@ -152,7 +164,7 @@ const Layout = ({ children }) => {
         <div className={cn(
           "flex-1 overflow-y-auto",
           location.pathname === '/viewer' ? "p-0" : "px-8 lg:px-12 pt-16 pb-12"
-        )}>
+        )} data-scroll-container>
           <div className={cn(
             "mx-auto animate-fade-in h-full",
             location.pathname === '/viewer' ? "max-w-none" : "max-w-6xl"
