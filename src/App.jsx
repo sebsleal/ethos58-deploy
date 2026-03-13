@@ -12,11 +12,13 @@ const loadLogAnalyzer = () => import('./pages/LogAnalyzer');
 const loadLogViewer = () => import('./pages/LogViewer');
 const loadOnboarding = () => import('./components/Onboarding');
 const loadChangelog = () => import('./components/Changelog');
+const loadGarage = () => import('./pages/Garage');
 
 const LogAnalyzer = lazy(loadLogAnalyzer);
 const LogViewer = lazy(loadLogViewer);
 const Onboarding = lazy(loadOnboarding);
 const Changelog = lazy(loadChangelog);
+const Garage = lazy(loadGarage);
 
 function LoadingFallback() {
   return (
@@ -42,6 +44,7 @@ function App() {
       void loadLogAnalyzer();
       void loadOnboarding();
       void loadChangelog();
+      void loadGarage();
     };
 
     if ('requestIdleCallback' in window) {
@@ -254,6 +257,7 @@ function App() {
             <Route path="/analyzer" element={<LogAnalyzer />} />
             <Route path="/viewer" element={<LogViewer />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/garage" element={<Garage />} />
           </Routes>
         </Suspense>
       </Layout>

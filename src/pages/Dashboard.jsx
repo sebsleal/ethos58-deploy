@@ -434,7 +434,7 @@ const Dashboard = () => {
                     key={log.id}
                     onClick={() => {
                       const result = getLogResult(log.id);
-                      navigate('/analyzer', result ? { state: { analysis: result } } : {});
+                      navigate('/analyzer', result?.analysis ? { state: { analysis: result.analysis } } : {});
                     }}
                     className="flex items-center gap-3 p-3 rounded-lg bg-gray-50 dark:bg-zinc-900/40 border border-gray-100 dark:border-zinc-800 hover:border-brand-500/30 transition-colors group text-left w-full"
                   >

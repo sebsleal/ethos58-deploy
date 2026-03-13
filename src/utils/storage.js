@@ -6,6 +6,7 @@
 const KEYS = {
   RECENT_LOGS:      'ethos_recent_logs',
   LOG_RESULTS:      'ethos_log_results',
+  LOG_GARAGE:       'ethos_log_garage',
   ACTIVE_BLEND:     'ethos_active_blend',
   SETTINGS:         'ethos_settings',
   THEME:            'theme',
@@ -84,7 +85,7 @@ export function saveRecentLog(analysis) {
 
   // Store full analysis result keyed by ID so it can be reopened
   try {
-    localStorage.setItem(`${KEYS.LOG_RESULTS}_${id}`, JSON.stringify(analysis));
+    localStorage.setItem(`${KEYS.LOG_RESULTS}_${id}`, JSON.stringify({ analysis, csvText: null }));
   } catch {
     // localStorage quota exceeded — skip full result storage
   }
@@ -92,9 +93,154 @@ export function saveRecentLog(analysis) {
   return updated;
 }
 
+function getGarageIndex() {
+  try {
+    const rows = JSON.parse(localStorage.getItem(KEYS.LOG_GARAGE) || '[]');
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveGarageIndex(entries) {
+  localStorage.setItem(KEYS.LOG_GARAGE, JSON.stringify(entries));
+}
+
+export function getGarageLogs() {
+  return getGarageIndex().sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+export function saveGarageLog(analysis, csvText = null) {
+  const id = Date.now();
+  const timingPull = analysis.metrics?.timingCorrections?.max_correction ?? null;
+  const healthScore = computeHealthScore(analysis);
+
+  const entry = {
+    id,
+    filename: analysis.filename,
+    createdAt: new Date().toISOString(),
+    status: analysis.status,
+    engine: analysis.carDetails?.engine || '—',
+    ethanol: analysis.carDetails?.ethanol ?? '—',
+    tune: analysis.carDetails?.tuneStage || '—',
+    afr: analysis.metrics?.afr?.actual ?? null,
+    hpfp: analysis.metrics?.hpfp?.actual ?? null,
+    rowCount: analysis.row_count ?? null,
+    timingPull,
+    healthScore,
+    tags: [],
+    notes: '',
+    hasCsv: Boolean(csvText),
+  };
+
+  const current = getGarageIndex();
+  saveGarageIndex([entry, ...current]);
+
+  try {
+    localStorage.setItem(`${KEYS.LOG_RESULTS}_${id}`, JSON.stringify({ analysis, csvText }));
+  } catch {
+    // localStorage quota exceeded — skip full payload storage
+  }
+
+  return entry;
+}
+
+export function updateGarageLogMeta(id, updates) {
+  const current = getGarageIndex();
+  const next = current.map((item) => item.id === id ? { ...item, ...updates } : item);
+  saveGarageIndex(next);
+  return next.find((item) => item.id === id) ?? null;
+}
+
+export function deleteGarageLog(id) {
+  const current = getGarageIndex();
+  const next = current.filter((item) => item.id !== id);
+  saveGarageIndex(next);
+  localStorage.removeItem(`${KEYS.LOG_RESULTS}_${id}`);
+}
+
+export function exportGarageBackup() {
+  const logs = getGarageLogs();
+  const payload = logs.map((entry) => ({
+    ...entry,
+    full: getLogResult(entry.id),
+  }));
+  return {
+    schema: 'ethos58-garage-v1',
+    exportedAt: new Date().toISOString(),
+    logs: payload,
+  };
+}
+
+export function importGarageBackup(data, mode = 'merge') {
+  if (!data || !Array.isArray(data.logs)) {
+    throw new Error('Invalid backup format.');
+  }
+
+  const existing = mode === 'replace' ? [] : getGarageIndex();
+  const existingIds = new Set(existing.map((item) => item.id));
+  const importedEntries = [];
+
+  for (const log of data.logs) {
+    const nextId = existingIds.has(log.id) ? (Date.now() + Math.floor(Math.random() * 100000)) : log.id;
+    existingIds.add(nextId);
+    const entry = {
+      id: nextId,
+      filename: log.filename || 'Imported Log',
+      createdAt: log.createdAt || new Date().toISOString(),
+      status: log.status || 'Unknown',
+      engine: log.engine || '—',
+      ethanol: log.ethanol ?? '—',
+      tune: log.tune || '—',
+      afr: log.afr ?? null,
+      hpfp: log.hpfp ?? null,
+      rowCount: log.rowCount ?? null,
+      timingPull: log.timingPull ?? null,
+      healthScore: log.healthScore ?? null,
+      tags: Array.isArray(log.tags) ? log.tags : [],
+      notes: typeof log.notes === 'string' ? log.notes : '',
+      hasCsv: Boolean(log?.full?.csvText),
+    };
+    importedEntries.push(entry);
+
+    if (log.full) {
+      localStorage.setItem(`${KEYS.LOG_RESULTS}_${nextId}`, JSON.stringify(log.full));
+    }
+  }
+
+  saveGarageIndex([...importedEntries, ...existing]);
+  return importedEntries.length;
+}
+
+export function exportGarageSummaryCsv() {
+  const logs = getGarageLogs();
+  const headers = ['id', 'filename', 'createdAt', 'status', 'engine', 'ethanol', 'tune', 'rowCount', 'timingPull', 'healthScore', 'tags', 'notes'];
+  const escape = (value) => `"${String(value ?? '').replaceAll('"', '""')}"`;
+  const rows = logs.map((log) => [
+    log.id,
+    log.filename,
+    log.createdAt,
+    log.status,
+    log.engine,
+    log.ethanol,
+    log.tune,
+    log.rowCount,
+    log.timingPull,
+    log.healthScore,
+    (log.tags || []).join('|'),
+    log.notes || '',
+  ].map(escape).join(','));
+  return [headers.join(','), ...rows].join('\n');
+}
+
 export function getLogResult(id) {
   try {
-    return JSON.parse(localStorage.getItem(`${KEYS.LOG_RESULTS}_${id}`) || 'null');
+    const stored = JSON.parse(localStorage.getItem(`${KEYS.LOG_RESULTS}_${id}`) || 'null');
+    if (stored && typeof stored === 'object' && (stored.analysis || stored.csvText !== undefined)) {
+      return stored;
+    }
+    // Backward compatibility with older saves containing only analysis
+    return stored ? { analysis: stored, csvText: null } : null;
   } catch {
     return null;
   }
@@ -104,6 +250,12 @@ export function clearRecentLogs() {
   const logs = getRecentLogs();
   logs.forEach(l => localStorage.removeItem(`${KEYS.LOG_RESULTS}_${l.id}`));
   localStorage.removeItem(KEYS.RECENT_LOGS);
+}
+
+export function clearGarageLogs() {
+  const logs = getGarageIndex();
+  logs.forEach((l) => localStorage.removeItem(`${KEYS.LOG_RESULTS}_${l.id}`));
+  localStorage.removeItem(KEYS.LOG_GARAGE);
 }
 
 // ─── Active Blend ─────────────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { MonitorPlay, UploadCloud, Search, Eye, EyeOff, FileText, RotateCcw, BarChart2, XCircle, Droplet } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import { getSettings } from '../utils/storage';
 import { parseViewerCsv } from '../utils/viewerCsv';
 import {
@@ -130,6 +131,7 @@ function CustomTooltip({ active, payload }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 const LogViewer = () => {
+  const location = useLocation();
   const [fileData, setFileData] = useState(null);
   const [selected, setSelected] = useState(new Set());
   const [dragActive, setDragActive] = useState(false);
@@ -138,9 +140,34 @@ const LogViewer = () => {
   const maxPoints = DOWNSAMPLING_MAP[settings.downsampling] ?? 800;
   const lineWidth = LINE_WIDTH_MAP[settings.lineThickness] ?? 1.5;
 
+  const processCsvText = useCallback((csvText, filename = 'Imported Log.csv') => {
+    const parsed = parseCSV(csvText);
+    if (!parsed) return;
+    const { headers, rows } = parsed;
+    const numericChannels = detectNumericChannels(headers, rows);
+    const timeCol = detectTimeColumn(headers);
+    const stats = computeStats(numericChannels, rows);
+    const sampled = Number.isFinite(maxPoints) ? downsample(rows, maxPoints) : rows;
+
+    const colors = {};
+    numericChannels.forEach((ch, i) => { colors[ch] = paletteColor(i); });
+
+    const autoSel = new Set(
+      numericChannels
+        .filter(ch => AUTO_KEYWORDS.some(kw => ch.toLowerCase().includes(kw)))
+        .slice(0, 6)
+    );
+    if (autoSel.size === 0) numericChannels.slice(0, 4).forEach(ch => autoSel.add(ch));
+
+    setFileData({ filename, rows: sampled, numericChannels, timeCol, stats, colors });
+    setSelected(autoSel);
+    setSearch('');
+  }, [maxPoints]);
+
   const processFile = useCallback((file) => {
     const reader = new FileReader();
     reader.onload = (e) => {
+      processCsvText(e.target.result, file.name);
       const parsed = parseViewerCsv(e.target.result);
       if (!parsed) return;
       const { headers, rows } = parsed;
@@ -164,7 +191,13 @@ const LogViewer = () => {
       setSearch('');
     };
     reader.readAsText(file);
-  }, [maxPoints]);
+  }, [processCsvText]);
+
+  useEffect(() => {
+    if (location.state?.csvText) {
+      processCsvText(location.state.csvText, location.state.filename || 'Garage Log.csv');
+    }
+  }, [location.state, processCsvText]);
 
   const handleDrag = (e) => {
     e.preventDefault(); e.stopPropagation();

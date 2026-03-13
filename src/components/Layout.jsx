@@ -9,6 +9,7 @@ import {
   Droplet,
   MonitorPlay,
   Settings,
+  Archive,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -26,6 +27,7 @@ const Layout = ({ children }) => {
     { name: 'Blend Calc', path: '/calculator', icon: Droplet },
     { name: 'Log Viewer', path: '/viewer', icon: MonitorPlay },
     { name: 'Log Analyzer', path: '/analyzer', icon: Activity, experimental: true },
+    { name: 'Garage', path: '/garage', icon: Archive },
     { name: 'Settings', path: '/settings', icon: Settings },
   ];
 
