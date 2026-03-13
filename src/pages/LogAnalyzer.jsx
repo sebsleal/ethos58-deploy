@@ -6,7 +6,7 @@ import {
   Lightbulb, Info, Download, GitCompare, MessageSquarePlus, Tag, Cpu, TrendingDown,
 } from 'lucide-react';
 import { analyzeLog } from '../utils/logAnalyzer';
-import { saveRecentLog, getAnnotations, saveAnnotations } from '../utils/storage';
+import { saveRecentLog, saveGarageLog, getAnnotations, saveAnnotations } from '../utils/storage';
 import { trackEvent, trackError } from '../utils/telemetry';
 import { hapticSuccess, hapticWarning, hapticError } from '../utils/haptics';
 import {
@@ -104,6 +104,7 @@ const LogAnalyzer = () => {
           setCompareAnalysis(result);
         } else {
           saveRecentLog(result);
+          saveGarageLog(result, e.target.result);
           setAnalysis(result);
           setAnnotations(getAnnotations(result.filename + '_' + result.row_count));
           // Haptic feedback based on overall log health
