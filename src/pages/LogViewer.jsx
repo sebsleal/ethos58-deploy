@@ -2,6 +2,7 @@ import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { MonitorPlay, UploadCloud, Search, Eye, EyeOff, FileText, RotateCcw, BarChart2, XCircle, Droplet } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { getSettings } from '../utils/storage';
+import { parseViewerCsv } from '../utils/viewerCsv';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Brush,
@@ -15,34 +16,6 @@ const PALETTE = [
 ];
 
 function paletteColor(i) { return PALETTE[i % PALETTE.length]; }
-
-// ── Frontend CSV parser ────────────────────────────────────────────────────────
-function parseRow(line) {
-  const out = []; let cur = ''; let inQ = false;
-  for (const c of line) {
-    if (c === '"') { inQ = !inQ; }
-    else if (c === ',' && !inQ) { out.push(cur.trim()); cur = ''; }
-    else cur += c;
-  }
-  out.push(cur.trim());
-  return out;
-}
-
-function parseCSV(text) {
-  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter(l => l.trim());
-  if (lines.length < 2) return null;
-  const headers = parseRow(lines[0]);
-  if (headers.length < 2) return null;
-  const rows = [];
-  for (let i = 1; i < lines.length; i++) {
-    const vals = parseRow(lines[i]);
-    if (vals.length === 0) continue;
-    const row = {};
-    headers.forEach((h, j) => { row[h] = vals[j] ?? ''; });
-    rows.push(row);
-  }
-  return { headers, rows };
-}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const TIME_KEYWORDS = ['time', 'timestamp', 'elapsed', 'log time'];
@@ -195,6 +168,27 @@ const LogViewer = () => {
     const reader = new FileReader();
     reader.onload = (e) => {
       processCsvText(e.target.result, file.name);
+      const parsed = parseViewerCsv(e.target.result);
+      if (!parsed) return;
+      const { headers, rows } = parsed;
+      const numericChannels = detectNumericChannels(headers, rows);
+      const timeCol = detectTimeColumn(headers);
+      const stats = computeStats(numericChannels, rows);
+      const sampled = Number.isFinite(maxPoints) ? downsample(rows, maxPoints) : rows;
+
+      const colors = {};
+      numericChannels.forEach((ch, i) => { colors[ch] = paletteColor(i); });
+
+      const autoSel = new Set(
+        numericChannels
+          .filter(ch => AUTO_KEYWORDS.some(kw => ch.toLowerCase().includes(kw)))
+          .slice(0, 6)
+      );
+      if (autoSel.size === 0) numericChannels.slice(0, 4).forEach(ch => autoSel.add(ch));
+
+      setFileData({ filename: file.name, rows: sampled, numericChannels, timeCol, stats, colors });
+      setSelected(autoSel);
+      setSearch('');
     };
     reader.readAsText(file);
   }, [processCsvText]);

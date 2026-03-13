@@ -15,6 +15,8 @@ const KEYS = {
   ANNOTATIONS:      'ethos_annotations',
   LAST_VERSION:     'ethos_last_version',
   ONBOARDING_DONE:  'ethos_onboarding_done',
+  STATION_PRESETS:  'ethos_station_presets',
+  FUEL_PLANNER:     'ethos_fuel_planner',
 };
 
 const MAX_RECENT_LOGS = 10;
@@ -66,6 +68,7 @@ export function saveRecentLog(analysis) {
     engine:      analysis.carDetails?.engine  || '—',
     ethanol:     analysis.carDetails?.ethanol ?? '—',
     tune:        analysis.carDetails?.tuneStage || '—',
+    ambientTemp: analysis.metrics?.iat?.value ?? null,
     afr:         analysis.metrics?.afr?.actual ?? null,
     hpfp:        analysis.metrics?.hpfp?.actual ?? null,
     rowCount:    analysis.row_count ?? null,
@@ -280,11 +283,8 @@ export function clearActiveBlend() {
 const SETTINGS_DEFAULTS = {
   theme:          'system',
   units:          'US',
-  compactView:    false,
   downsampling:   'Original (All Data)',
-  defaultPreset:  'None (Clear)',
   lineThickness:  'Normal (1.5px)',
-  timeFormat:     'Elapsed (Seconds)',
   blendResultUnit: 'auto',
 };
 
@@ -329,6 +329,40 @@ export function deleteBlendProfile(name) {
   const profiles = getBlendProfiles();
   delete profiles[name];
   localStorage.setItem(KEYS.BLEND_PROFILES, JSON.stringify(profiles));
+}
+
+
+export function getStationPresets() {
+  try {
+    return JSON.parse(localStorage.getItem(KEYS.STATION_PRESETS) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+export function saveStationPreset(name, data) {
+  const presets = getStationPresets();
+  presets[name] = { ...data, savedAt: new Date().toISOString() };
+  localStorage.setItem(KEYS.STATION_PRESETS, JSON.stringify(presets));
+}
+
+export function deleteStationPreset(name) {
+  const presets = getStationPresets();
+  delete presets[name];
+  localStorage.setItem(KEYS.STATION_PRESETS, JSON.stringify(presets));
+}
+
+export function getFuelPlannerDefaults() {
+  try {
+    return JSON.parse(localStorage.getItem(KEYS.FUEL_PLANNER) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+export function saveFuelPlannerDefaults(defaults) {
+  const current = getFuelPlannerDefaults();
+  localStorage.setItem(KEYS.FUEL_PLANNER, JSON.stringify({ ...current, ...defaults }));
 }
 
 // ─── Annotations ─────────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, useMemo } from 'react';
-import { ArrowRight, Activity, Droplet, FileText, Settings2, Zap, MonitorPlay, CheckCircle, AlertTriangle, Trash2, Heart, TrendingUp } from 'lucide-react';
+import { ArrowRight, Activity, Droplet, FileText, Settings2, Zap, MonitorPlay, CheckCircle, AlertTriangle, Trash2, Heart, TrendingUp, Upload } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { getRecentLogs, clearRecentLogs, getActiveBlend, clearActiveBlend, getLogResult } from '../utils/storage';
@@ -39,6 +39,23 @@ function scoreLabel(score) {
   if (score >= 80) return 'Good';
   if (score >= 55) return 'Caution';
   return 'Risk';
+}
+
+function formatMonthLabel(monthKey) {
+  const [year, month] = monthKey.split('-').map(Number);
+  if (!year || !month) return monthKey;
+  return new Date(year, month - 1, 1).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+}
+
+function average(nums) {
+  if (!nums.length) return null;
+  return nums.reduce((sum, value) => sum + value, 0) / nums.length;
+}
+
+function toNumericValue(value) {
+  if (value === null || value === undefined || value === '—' || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 // SVG ring progress component
@@ -96,8 +113,11 @@ const CustomTooltip = ({ active, payload, label }) => {
       <p className="font-semibold" style={{ color: scoreColor(d.healthScore) }}>
         Score {d.healthScore ?? '—'} — {scoreLabel(d.healthScore)}
       </p>
+      {d.sampleSize > 1 && (
+        <p className="text-gray-400 dark:text-zinc-500">{d.sampleSize} logs in group</p>
+      )}
       {d.timingPull !== null && d.timingPull !== undefined && (
-        <p className="text-gray-400 dark:text-zinc-500">Max pull {d.timingPull}°</p>
+        <p className="text-gray-400 dark:text-zinc-500">Timing pull avg {d.timingPull}°</p>
       )}
     </div>
   );
@@ -108,6 +128,7 @@ const Dashboard = () => {
   const [activeBlend, setActiveBlend] = useState(null);
   const [pullDistance, setPullDistance] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [trendFilter, setTrendFilter] = useState('date');
   const startTouchYRef = useRef(null);
   const pullDistanceRef = useRef(0); // mirrors pullDistance for use in non-reactive closures
   const refreshingRef = useRef(false);
@@ -232,18 +253,67 @@ const Dashboard = () => {
 
   const mostRecentLog = recentLogs[0] || null;
 
-  // Build timeline data — oldest first for chart
-  const timelineData = useMemo(() => {
-    return [...recentLogs]
-      .filter(l => l.healthScore !== null && l.healthScore !== undefined)
-      .reverse()
-      .map(l => ({
-        date: formatShortDate(l.date),
-        healthScore: l.healthScore,
-        timingPull: l.timingPull,
-        filename: l.filename,
-      }));
+  const filteredTrendLogs = useMemo(() => {
+    return recentLogs.filter(log => log.healthScore !== null && log.healthScore !== undefined);
   }, [recentLogs]);
+
+  const timelineData = useMemo(() => {
+    const sorted = [...filteredTrendLogs].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    if (trendFilter === 'date') {
+      return sorted.map(l => ({
+        label: formatShortDate(l.date),
+        groupKey: l.date,
+        healthScore: l.healthScore,
+        baselineScore: null,
+        timingPull: l.timingPull,
+        sampleSize: 1,
+      }));
+    }
+
+    const grouped = sorted.reduce((acc, log) => {
+      let groupKey = null;
+      let label = null;
+
+      if (trendFilter === 'ethanol') {
+        groupKey = String(log.ethanol ?? '—');
+        label = `E${groupKey}`;
+      } else if (trendFilter === 'tune') {
+        groupKey = String(log.tune || 'Unknown');
+        label = groupKey;
+      } else if (trendFilter === 'ambient') {
+        const ambient = toNumericValue(log.ambientTemp);
+        if (ambient === null) return acc;
+        const bucketStart = Math.floor(ambient / 10) * 10;
+        const bucketEnd = bucketStart + 9;
+        groupKey = `${bucketStart}`;
+        label = `${bucketStart}–${bucketEnd}°F`;
+      } else if (trendFilter === 'month') {
+        const dt = new Date(log.date);
+        const month = String(dt.getMonth() + 1).padStart(2, '0');
+        groupKey = `${dt.getFullYear()}-${month}`;
+        label = formatMonthLabel(groupKey);
+      }
+
+      if (!groupKey || !label) return acc;
+      if (!acc[groupKey]) acc[groupKey] = { key: groupKey, label, values: [], timing: [] };
+      acc[groupKey].values.push(log.healthScore);
+      const pull = toNumericValue(log.timingPull);
+      if (pull !== null) acc[groupKey].timing.push(pull);
+      return acc;
+    }, {});
+
+    return Object.values(grouped)
+      .sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }))
+      .map(group => ({
+        label: group.label,
+        groupKey: group.key,
+        healthScore: Number(average(group.values).toFixed(1)),
+        baselineScore: 75,
+        timingPull: average(group.timing) !== null ? Number(average(group.timing).toFixed(1)) : null,
+        sampleSize: group.values.length,
+      }));
+  }, [filteredTrendLogs, trendFilter]);
 
   return (
     <div
@@ -261,6 +331,7 @@ const Dashboard = () => {
       <header className="mb-8">
         <h1 className="text-2xl font-semibold tracking-tight text-gray-900 dark:text-white">Dashboard</h1>
         <p className="text-sm text-gray-500 dark:text-zinc-400 mt-1">Overview of your analysis tools and recent logs.</p>
+        <p className="text-xs text-gray-400 dark:text-zinc-500 mt-2">Batch tip: drag a folder of CSVs into Log Analyzer to quickly build trend baselines.</p>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -279,15 +350,44 @@ const Dashboard = () => {
 
           {/* Health Score Timeline */}
           {timelineData.length >= 2 && (
-            <SectionPanel title="Tune Health Timeline" icon={TrendingUp}>
+            <SectionPanel
+              title="Tune Health Timeline"
+              icon={TrendingUp}
+              action={(
+                <div className="flex items-center gap-2">
+                  <Upload size={12} className="text-gray-400 dark:text-zinc-500" />
+                  <select
+                    value={trendFilter}
+                    onChange={(event) => setTrendFilter(event.target.value)}
+                    className="text-xs rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 text-gray-600 dark:text-zinc-300"
+                  >
+                    <option value="date">By date</option>
+                    <option value="month">By month</option>
+                    <option value="ethanol">By ethanol</option>
+                    <option value="tune">By tune</option>
+                    <option value="ambient">By ambient temp</option>
+                  </select>
+                </div>
+              )}
+            >
               <div className="mt-3 h-36">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={timelineData} margin={{ top: 4, right: 8, left: -24, bottom: 0 }}>
-                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#71717a' }} tickLine={false} axisLine={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#71717a' }} tickLine={false} axisLine={false} />
                     <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#71717a' }} tickLine={false} axisLine={false} />
                     <Tooltip content={<CustomTooltip />} />
                     <ReferenceLine y={80} stroke="#22c55e" strokeDasharray="3 3" strokeOpacity={0.4} />
                     <ReferenceLine y={55} stroke="#eab308" strokeDasharray="3 3" strokeOpacity={0.4} />
+                    {trendFilter !== 'date' && (
+                      <Line
+                        type="monotone"
+                        dataKey="baselineScore"
+                        stroke="#a1a1aa"
+                        strokeDasharray="4 4"
+                        dot={false}
+                        strokeWidth={1.5}
+                      />
+                    )}
                     <Line
                       type="monotone"
                       dataKey="healthScore"
@@ -296,7 +396,7 @@ const Dashboard = () => {
                       dot={(props) => {
                         const { cx, cy, payload } = props;
                         return (
-                          <circle key={payload.date} cx={cx} cy={cy} r={3}
+                          <circle key={payload.groupKey || payload.label} cx={cx} cy={cy} r={3}
                             fill={scoreColor(payload.healthScore)} stroke="none" />
                         );
                       }}
@@ -306,7 +406,9 @@ const Dashboard = () => {
                 </ResponsiveContainer>
               </div>
               <p className="text-[10px] text-gray-400 dark:text-zinc-600 mt-1 text-right">
-                Green ≥ 80 · Yellow ≥ 55 · Red &lt; 55
+                {trendFilter === 'date'
+                  ? 'Per-log snapshots by date'
+                  : 'Trend mode: grouped averages with baseline at 75'}
               </p>
             </SectionPanel>
           )}

@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useState, useEffect } from 'react';
-import { Settings, User, Bell, Shield, Database, Info, Sparkles } from 'lucide-react';
+import { Settings, User, Info, Sparkles } from 'lucide-react';
 import { getSettings, saveSetting, getLastSeenVersion } from '../utils/storage';
 import { CURRENT_VERSION } from '../constants/version';
 
@@ -32,9 +32,6 @@ const SettingsPage = () => {
     { id: 'account',      label: 'Account Profile', icon: User },
     { id: 'preferences',  label: 'Preferences',     icon: Settings },
     { id: 'updates',      label: 'Update Log',      icon: Sparkles },
-    { id: 'notifications', label: 'Notifications',  icon: Bell },
-    { id: 'security',     label: 'Security',        icon: Shield },
-    { id: 'integrations', label: 'Integrations',    icon: Database },
   ];
 
   return (
@@ -143,21 +140,6 @@ const SettingsPage = () => {
 
                   <hr className="border-gray-200 dark:border-white/5" />
 
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Compact View</h4>
-                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Reduce spacing in tables and layout elements.</p>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        className="sr-only peer"
-                        checked={s.compactView}
-                        onChange={e => update('compactView', e.target.checked)}
-                      />
-                      <div className="w-11 h-6 bg-gray-200 dark:bg-surface-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white peer-checked:after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 border border-gray-300 dark:border-transparent"></div>
-                    </label>
-                  </div>
                 </div>
               </div>
 
@@ -187,24 +169,6 @@ const SettingsPage = () => {
                       <option>Fast (800 pts)</option>
                       <option>High Quality (1600 pts)</option>
                       <option>Original (All Data)</option>
-                    </select>
-                  </div>
-
-                  <hr className="border-gray-200 dark:border-white/5" />
-
-                  <div className="flex items-center justify-between">
-                    <div className="pr-12">
-                      <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Default On-Load Preset</h4>
-                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Automatically select a channel preset when opening a new CSV.</p>
-                    </div>
-                    <select
-                      value={s.defaultPreset}
-                      onChange={e => update('defaultPreset', e.target.value)}
-                      className="bg-white dark:bg-[#121214] border border-gray-300 dark:border-white/10 rounded-lg px-3 py-2 text-gray-800 dark:text-gray-200 text-sm outline-none focus:border-brand-500 transition-colors shadow-sm dark:shadow-none"
-                    >
-                      <option>Tuner Preset</option>
-                      <option>Fueling Preset</option>
-                      <option>None (Clear)</option>
                     </select>
                   </div>
 
@@ -255,20 +219,6 @@ const SettingsPage = () => {
 
                   <hr className="border-gray-200 dark:border-white/5" />
 
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Time Format</h4>
-                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Display log axis time as elapsed seconds or absolute timestamp.</p>
-                    </div>
-                    <select
-                      value={s.timeFormat}
-                      onChange={e => update('timeFormat', e.target.value)}
-                      className="bg-white dark:bg-[#121214] border border-gray-300 dark:border-white/10 rounded-lg px-3 py-2 text-gray-800 dark:text-gray-200 text-sm outline-none focus:border-brand-500 transition-colors shadow-sm dark:shadow-none"
-                    >
-                      <option>Elapsed (Seconds)</option>
-                      <option>Absolute Time</option>
-                    </select>
-                  </div>
                 </div>
               </div>
             </div>
@@ -296,13 +246,6 @@ const SettingsPage = () => {
                   Open Update Log
                 </button>
               </div>
-            </div>
-          )}
-
-          {activeTab !== 'account' && activeTab !== 'preferences' && activeTab !== 'updates' && (
-            <div className="h-full flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 py-12">
-              <Settings size={48} className="opacity-20 mb-4" />
-              <p className="text-sm font-medium text-gray-400 dark:text-gray-400">Settings for {activeTab} coming soon.</p>
             </div>
           )}
 
