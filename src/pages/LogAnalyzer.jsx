@@ -395,6 +395,47 @@ const LogAnalyzer = () => {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-1 flex flex-col gap-4">
+              {analysis.diagnostics?.length > 0 && (
+                <div className="bg-white dark:bg-surface-200 border border-gray-200 dark:border-white/5 rounded-xl p-6 shadow-sm">
+                  <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2 mb-4 uppercase tracking-wide">
+                    <Info className="text-brand-400" size={18} /> Diagnostic Workflow
+                  </h2>
+                  <div className="space-y-3">
+                    {analysis.diagnostics.map((card) => (
+                      <div key={card.id} className="border border-gray-200 dark:border-white/10 rounded-lg p-3.5 bg-gray-50/80 dark:bg-surface-300/50">
+                        <div className="flex items-start justify-between gap-2">
+                          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">{card.title}</h3>
+                          <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${getStatusColor(card.severity)}`}>
+                            {card.severity}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-600 dark:text-gray-300 mt-2 leading-relaxed">{card.evidence}</p>
+                        {card.likelyCauses?.length > 0 && (
+                          <div className="mt-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Likely Causes</p>
+                            <ul className="mt-1 space-y-1">
+                              {card.likelyCauses.map((cause, i) => (
+                                <li key={i} className="text-xs text-gray-700 dark:text-gray-300">• {cause}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {card.recommendedChecks?.length > 0 && (
+                          <div className="mt-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Recommended Checks</p>
+                            <ul className="mt-1 space-y-1">
+                              {card.recommendedChecks.slice(0, 4).map((check, i) => (
+                                <li key={i} className="text-xs text-gray-700 dark:text-gray-300">• {check}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {analysis.keyPoints?.length > 0 && (
                 <div className="bg-white dark:bg-surface-200 border border-gray-200 dark:border-white/5 rounded-xl p-6 shadow-sm">
                   <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2 mb-5 uppercase tracking-wide">
