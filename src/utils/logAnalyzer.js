@@ -736,6 +736,131 @@ function buildKeyPoints(afr, hpfp, iat, timing, carDetails) {
   return points;
 }
 
+// ─── Diagnostic Workflow Cards ───────────────────────────────────────────────
+
+function formatTimeLabel(v) {
+  if (typeof v !== 'number' || Number.isNaN(v)) return null;
+  return `${roundN(v, 1)}s`;
+}
+
+function getEngineSpecificChecks(engine) {
+  const e = (engine || '').toUpperCase();
+  if (e.includes('S58')) return ['Run repeated 3rd–4th gear pulls to confirm charge-cooling consistency.', 'Verify charge-cooler pump flow and coolant bleed state.'];
+  if (e.includes('N54') || e.includes('N55')) return ['Pressure-test charge pipes and vacuum lines for boost leaks.', 'Inspect plugs/coils and log misfire counters during pull.'];
+  if (e.includes('B58')) return ['Review rail-pressure control and injector corrections in the same RPM band.', 'Check HPFP/LPFP targets against your map revision notes.'];
+  return ['Re-run a clean WOT pull in one gear and compare timing/HPFP trend repeatability.'];
+}
+
+function getTuneChecks(tuneStage, ethanol) {
+  const stage = (tuneStage || '').toLowerCase();
+  const e = Number(ethanol) || 10;
+  const checks = [];
+
+  if (stage.includes('custom')) checks.push('Ask your tuner to review this exact time window and smooth load-to-torque transition.');
+  if (stage.includes('stage 2')) checks.push('Confirm hardware assumptions for Stage 2 (downpipe/intercooling/fueling) match the map.');
+  if (e >= 40) checks.push(`Validate low-side fuel delivery on E${e} at high duty (LPFP voltage, bucket fill, and filter condition).`);
+  else checks.push(`If knock persists on E${e}, test one step higher ethanol blend and recheck timing response.`);
+
+  return checks;
+}
+
+function buildDiagnosticCards(rows, columns, timingColumns, boostUnit, metrics, carDetails) {
+  const cards = [];
+  const timeCol = columns.time;
+  const loadCol = columns.load;
+  const boostCol = columns.boost;
+  const pedalCol = columns.pedal;
+  const throttleCol = columns.throttle;
+  const hpfpCol = columns.hpfp;
+  const hpfpTargetCol = columns.hpfp_target;
+  const iatCol = columns.iat;
+
+  const engineChecks = getEngineSpecificChecks(carDetails.engine);
+  const tuneChecks = getTuneChecks(carDetails.tuneStage, carDetails.ethanol);
+
+  // HPFP drop start detection
+  if (hpfpCol && hpfpTargetCol && metrics?.hpfp?.max_drop_pct >= HPFP_DROP_CAUTION_PCT) {
+    let startRow = null;
+    for (const row of rows) {
+      const load = num(row, loadCol);
+      const boost = normalizeBoostToPsi(num(row, boostCol), boostUnit);
+      const pedal = num(row, pedalCol);
+      const throttle = num(row, throttleCol);
+      if (!isHpfpCrashWindow(load, boost, pedal, throttle)) continue;
+
+      const target = num(row, hpfpTargetCol);
+      const actual = num(row, hpfpCol);
+      if (isNaN(target) || target <= 1200 || isNaN(actual) || actual <= 0) continue;
+
+      const dropPct = ((target - actual) / target) * 100;
+      if (dropPct >= HPFP_DROP_CAUTION_PCT) {
+        startRow = { row, dropPct, target, actual };
+        break;
+      }
+    }
+
+    if (startRow) {
+      const t = formatTimeLabel(num(startRow.row, timeCol));
+      cards.push({
+        id: 'hpfp-drop-start',
+        severity: metrics.hpfp.status,
+        title: `HPFP drop starts${t ? ` at ${t}` : ''}`,
+        evidence: `Rail pressure fell to ${roundN(startRow.actual, 0)} psi vs ${roundN(startRow.target, 0)} psi target (${roundN(startRow.dropPct, 1)}% drop) in a high-load window.`,
+        likelyCauses: ['Low-side fuel supply saturation (LPFP or filter restriction).', 'HPFP control or mechanical limitation at peak torque demand.'],
+        recommendedChecks: [...engineChecks, ...tuneChecks],
+      });
+    }
+  }
+
+  // Timing pull after IAT spike detection
+  if (iatCol && timingColumns.length > 0 && metrics?.timingCorrections?.status !== 'Safe') {
+    let firstIatSpikeTime = null;
+    let firstPullTime = null;
+    let worstPull = 0;
+
+    for (const row of rows) {
+      const load = num(row, loadCol);
+      const boost = normalizeBoostToPsi(num(row, boostCol), boostUnit);
+      const pedal = num(row, pedalCol);
+      const throttle = num(row, throttleCol);
+      const t = num(row, timeCol);
+
+      if (!isDemand(load, boost, pedal, throttle)) continue;
+
+      const iatRaw = num(row, iatCol);
+      const iatF = iatRaw > 100 ? iatRaw : (iatRaw * 9 / 5 + 32);
+      if (firstIatSpikeTime === null && !isNaN(iatF) && iatF >= IAT_CAUTION_F) firstIatSpikeTime = t;
+
+      let rowWorst = 0;
+      for (const col of timingColumns) {
+        const v = num(row, col);
+        if (!isNaN(v) && v < rowWorst) rowWorst = v;
+      }
+      if (rowWorst <= TIMING_CAUTION_DEG) {
+        if (firstPullTime === null) firstPullTime = t;
+        if (rowWorst < worstPull) worstPull = rowWorst;
+      }
+    }
+
+    if (firstIatSpikeTime !== null && firstPullTime !== null && firstPullTime >= firstIatSpikeTime) {
+      cards.push({
+        id: 'timing-after-iat',
+        severity: metrics.timingCorrections.status,
+        title: 'Timing pull appears after IAT spike',
+        evidence: `IAT crossed ${IAT_CAUTION_F}°F around ${formatTimeLabel(firstIatSpikeTime)} and timing pull reached ${roundN(worstPull, 1)}° by ${formatTimeLabel(firstPullTime)}.`,
+        likelyCauses: ['Charge-air heat soak reducing knock resistance.', 'Knock sensitivity from octane margin or ignition system weakness under heat.'],
+        recommendedChecks: [
+          'Log back-to-back pulls after full cooldown to isolate heat-related timing behavior.',
+          ...getEngineSpecificChecks(carDetails.engine),
+          ...getTuneChecks(carDetails.tuneStage, carDetails.ethanol),
+        ],
+      });
+    }
+  }
+
+  return cards;
+}
+
 // ─── Main Entry ──────────────────────────────────────────────────────────────
 
 /**
@@ -769,6 +894,7 @@ export function analyzeParsedLog(parsed, filename, carDetails = {}) {
   const overall = worstStatus(afr.status, hpfp.status, iat.status, timing.status);
 
   const keyPoints = buildKeyPoints(afr, hpfp, iat, timing, carDetails);
+  const diagnostics = buildDiagnosticCards(rows, columns, timingColumns, boostUnit, { afr, hpfp, iat, timingCorrections: timing }, carDetails);
 
   return {
     filename,
@@ -787,6 +913,7 @@ export function analyzeParsedLog(parsed, filename, carDetails = {}) {
     chartData: buildChartData(rows, columns, isLambdaAfr, boostUnit, 150, thresholds, timingColumns),
     knockScatter,
     keyPoints,
+    diagnostics,
     summary: {
       afr_status: afr.status,
       hpfp_status: hpfp.status,
