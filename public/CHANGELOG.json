@@ -1,5 +1,15 @@
 [
   {
+    "version": "2.1.1",
+    "date": "2026-03-13",
+    "title": "Fuel Planner Clarity + Tank Capacity Units",
+    "changes": [
+      { "type": "improved", "platform": "both", "text": "Fuel Planner now explains which inputs are required, which sections are optional, and what each planner field is used for" },
+      { "type": "improved", "platform": "both", "text": "Added a clearer planner summary so the output shows the current tank state, target blend, pump ethanol, and trip assumptions being used" },
+      { "type": "new", "platform": "both", "text": "Tank capacity can now be entered independently in gallons or litres without changing the rest of the calculator input units" }
+    ]
+  },
+  {
     "version": "2.1.0",
     "date": "2026-03-13",
     "title": "Garage, Diagnostics, Fuel Planner + Telemetry",
