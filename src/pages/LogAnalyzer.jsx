@@ -26,6 +26,14 @@ const FORMAT_COLOR = {
   Unknown: 'text-gray-400 bg-gray-500/10 border-gray-500/20',
 };
 
+const COMPARE_CHANNELS = [
+  { key: 'afrActual', label: 'AFR Actual', yAxisId: 'left', color: '#f59e0b' },
+  { key: 'afrTarget', label: 'AFR Target', yAxisId: 'left', color: '#fbbf24', dashed: true },
+  { key: 'boost', label: 'Boost (psi)', yAxisId: 'boost', color: '#60a5fa' },
+  { key: 'hpfpActual', label: 'HPFP Actual', yAxisId: 'hpfp', color: '#c084fc' },
+  { key: 'hpfpTarget', label: 'HPFP Target', yAxisId: 'hpfp', color: '#e9d5ff', dashed: true },
+];
+
 const LogAnalyzer = () => {
   const location = useLocation();
   const [carDetails, setCarDetails] = useState({ ethanol: 10, engine: 'B58 Gen1', tuneStage: 'Stage 1' });
@@ -44,6 +52,8 @@ const LogAnalyzer = () => {
   const [compareAnalysis, setCompareAnalysis] = useState(null);
   const [compareLoading, setCompareLoading] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
+  const [compareChannels, setCompareChannels] = useState(() => ({ afrActual: true, boost: true }));
+  const [hoverTime, setHoverTime] = useState(null);
 
   const [annotations, setAnnotations] = useState([]);
   const [annotationInput, setAnnotationInput] = useState('');
@@ -317,10 +327,81 @@ const LogAnalyzer = () => {
     return <circle r={0} fill="none" />;
   };
 
-  const mergedChartData = React.useMemo(
-    () => mergeCompareChartData(analysis, compareAnalysis),
-    [analysis, compareAnalysis]
-  );
+  const mergedChartData = React.useMemo(() => {
+    if (!analysis || !compareAnalysis) return analysis?.chartData || [];
+    const baseMap = {};
+    (analysis.chartData || []).forEach(pt => { baseMap[pt.time] = { ...pt }; });
+    (compareAnalysis.chartData || []).forEach(pt => {
+      if (!baseMap[pt.time]) baseMap[pt.time] = { time: pt.time };
+      COMPARE_CHANNELS.forEach(({ key }) => {
+        baseMap[pt.time][`${key}_b`] = pt[key];
+      });
+    });
+    return Object.values(baseMap).sort((a, b) => Number(a.time) - Number(b.time));
+  }, [analysis, compareAnalysis]);
+
+  const compareSummary = React.useMemo(() => {
+    if (!analysis || !compareAnalysis) return [];
+    const base = analysis.carDetails || {};
+    const next = compareAnalysis.carDetails || {};
+    const sameEngine = base.engine === next.engine;
+    const sameTune = base.tuneStage === next.tuneStage;
+    const sameFuel = Number(base.ethanol) === Number(next.ethanol);
+    const context = sameEngine && sameTune && sameFuel
+      ? 'same pull setup'
+      : sameEngine && sameTune
+        ? 'same tune, different fuel'
+        : sameEngine
+          ? 'before vs after tune'
+          : 'cross-platform comparison';
+
+    return [
+      { title: 'Comparison Context', value: context, detail: `${base.engine || 'Unknown'} → ${next.engine || 'Unknown'}` },
+      { title: 'Tune Match', value: sameTune ? 'Same tune' : 'Tune changed', detail: `${base.tuneStage || 'N/A'} → ${next.tuneStage || 'N/A'}` },
+      { title: 'Fuel Blend', value: sameFuel ? `Same E${base.ethanol ?? '—'}` : `E${base.ethanol ?? '—'} → E${next.ethanol ?? '—'}`, detail: sameFuel ? 'Ideal for same-pull validation' : 'Before/after blend comparison' },
+    ];
+  }, [analysis, compareAnalysis]);
+
+  const deltaCards = React.useMemo(() => {
+    if (!analysis || !compareAnalysis) return [];
+    const fields = [
+      { title: 'AFR', path: ['metrics', 'afr', 'actual'], unit: '', precision: 2 },
+      { title: 'HPFP', path: ['metrics', 'hpfp', 'actual'], unit: ' psi', precision: 0 },
+      { title: 'Timing', path: ['metrics', 'timingCorrections', 'max_correction'], unit: '°', precision: 2 },
+      { title: 'IAT', path: ['metrics', 'iat', 'peak_f'], unit: '°F', precision: 0 },
+    ];
+    const getValue = (obj, path) => path.reduce((acc, key) => acc?.[key], obj);
+    const peakBoost = (obj) => {
+      const vals = (obj?.chartData || []).map((pt) => Number(pt.boost)).filter((v) => Number.isFinite(v));
+      return vals.length ? Math.max(...vals) : null;
+    };
+    return [
+      ...fields.map((f) => {
+      const a = Number(getValue(analysis, f.path));
+      const b = Number(getValue(compareAnalysis, f.path));
+      const hasData = Number.isFinite(a) && Number.isFinite(b);
+      const delta = hasData ? Number((b - a).toFixed(f.precision)) : null;
+      return {
+        ...f,
+        base: hasData ? a : null,
+        compare: hasData ? b : null,
+        delta,
+      };
+    }),
+      (() => {
+        const base = peakBoost(analysis);
+        const compare = peakBoost(compareAnalysis);
+        const hasData = Number.isFinite(base) && Number.isFinite(compare);
+        return {
+          title: 'Boost Peak',
+          unit: ' psi',
+          base: hasData ? Number(base.toFixed(1)) : null,
+          compare: hasData ? Number(compare.toFixed(1)) : null,
+          delta: hasData ? Number((compare - base).toFixed(1)) : null,
+        };
+      })(),
+    ];
+  }, [analysis, compareAnalysis]);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -601,17 +682,64 @@ const LogAnalyzer = () => {
               </div>
 
               {showCompare && (
-                <div className="flex items-center gap-3 p-3 bg-brand-50 dark:bg-brand-500/5 border border-brand-200 dark:border-brand-500/20 rounded-xl">
-                  <GitCompare size={14} className="text-brand-500 shrink-0" />
-                  <p className="text-xs text-slate-600 dark:text-gray-300 flex-1">
-                    {compareAnalysis ? `Comparing: ${compareAnalysis.filename}` : 'Select a second log to overlay on the chart:'}
-                  </p>
-                  {compareLoading && <div className="w-4 h-4 border-2 border-brand-400 border-t-transparent rounded-full animate-spin" />}
-                  <label className="cursor-pointer text-xs font-bold text-brand-600 dark:text-brand-400 px-3 py-1.5 rounded-lg bg-brand-100 dark:bg-brand-500/20 hover:bg-brand-200 transition-colors">
-                    {compareAnalysis ? 'Change' : 'Browse'}
-                    <input type="file" className="hidden" accept=".csv" onChange={(e) => { if (e.target.files?.[0]) processFile(e.target.files[0], true); }} />
-                  </label>
-                  {compareAnalysis && <button onClick={() => setCompareAnalysis(null)} className="text-gray-400 hover:text-red-400 text-xs">✕</button>}
+                <div className="space-y-3 p-3 bg-brand-50 dark:bg-brand-500/5 border border-brand-200 dark:border-brand-500/20 rounded-xl">
+                  <div className="flex items-center gap-3">
+                    <GitCompare size={14} className="text-brand-500 shrink-0" />
+                    <p className="text-xs text-slate-600 dark:text-gray-300 flex-1">
+                      {compareAnalysis ? `Comparing: ${compareAnalysis.filename}` : 'Select a second log to overlay on the chart:'}
+                    </p>
+                    {compareLoading && <div className="w-4 h-4 border-2 border-brand-400 border-t-transparent rounded-full animate-spin" />}
+                    <label className="cursor-pointer text-xs font-bold text-brand-600 dark:text-brand-400 px-3 py-1.5 rounded-lg bg-brand-100 dark:bg-brand-500/20 hover:bg-brand-200 transition-colors">
+                      {compareAnalysis ? 'Change' : 'Browse'}
+                      <input type="file" className="hidden" accept=".csv" onChange={(e) => { if (e.target.files?.[0]) processFile(e.target.files[0], true); }} />
+                    </label>
+                    {compareAnalysis && <button onClick={() => setCompareAnalysis(null)} className="text-gray-400 hover:text-red-400 text-xs">✕</button>}
+                  </div>
+
+                  {compareAnalysis && (
+                    <>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        {compareSummary.map((item) => (
+                          <div key={item.title} className="rounded-lg border border-brand-200/60 dark:border-brand-500/20 bg-white/70 dark:bg-surface-300/30 p-2">
+                            <p className="text-[10px] uppercase tracking-wide text-gray-400">{item.title}</p>
+                            <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">{item.value}</p>
+                            <p className="text-[11px] text-gray-500 dark:text-gray-400">{item.detail}</p>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-1">Compare channels</p>
+                        <div className="flex flex-wrap gap-2">
+                          {COMPARE_CHANNELS.map((channel) => (
+                            <button
+                              key={channel.key}
+                              onClick={() => setCompareChannels((prev) => ({ ...prev, [channel.key]: !prev[channel.key] }))}
+                              className={`text-[11px] px-2 py-1 rounded-md border transition-colors ${compareChannels[channel.key] ? 'bg-white dark:bg-surface-300 text-gray-700 dark:text-gray-200 border-brand-300 dark:border-brand-500/30' : 'text-gray-400 border-gray-200 dark:border-white/10'}`}
+                            >
+                              {channel.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {compareAnalysis && (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                  {deltaCards.map((card) => (
+                    <div key={card.title} className="bg-white dark:bg-surface-200 border border-gray-200 dark:border-white/5 rounded-lg p-3">
+                      <p className="text-[10px] uppercase tracking-wide text-gray-400">{card.title} Δ</p>
+                      <p className={`text-sm font-bold ${card.delta == null ? 'text-gray-400' : card.delta <= 0 ? 'text-green-500' : 'text-red-400'}`}>
+                        {card.delta == null ? '—' : `${card.delta > 0 ? '+' : ''}${card.delta}${card.unit}`}
+                      </p>
+                      <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                        {card.base == null ? 'No overlap' : `${card.base}${card.unit} → ${card.compare}${card.unit}`}
+                      </p>
+                    </div>
+                  ))}
                 </div>
               )}
 
@@ -656,7 +784,7 @@ const LogAnalyzer = () => {
 
                   <div className="h-[350px] w-full bg-gray-50/50 dark:bg-surface-300/30 rounded-lg p-2 border border-gray-200 dark:border-white/5">
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={mergedChartData} margin={{ top: 10, right: 55, left: -20, bottom: 0 }} onClick={showAnnotationInput ? handleChartClick : undefined}>
+                      <LineChart data={mergedChartData} margin={{ top: 10, right: 55, left: -20, bottom: 0 }} onClick={showAnnotationInput ? handleChartClick : undefined} onMouseMove={(state) => { if (state?.activeLabel != null) setHoverTime(state.activeLabel); }} onMouseLeave={() => setHoverTime(null)}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#27272A" vertical={false} />
                         <XAxis dataKey="time" stroke="#71717A" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
                         <YAxis yAxisId="left" stroke="#71717A" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
@@ -670,10 +798,11 @@ const LogAnalyzer = () => {
                         <Line yAxisId="hpfp" type="monotone" dataKey="hpfpActual" stroke="#a855f7" name="HPFP Actual" strokeWidth={1.5} dot={false} connectNulls={false} />
                         <Line yAxisId="hpfp" type="monotone" dataKey="hpfpTarget" stroke="#d8b4fe" name="HPFP Target" strokeWidth={1.5} strokeDasharray="4 4" dot={false} connectNulls={false} />
 
-                        {compareAnalysis && <>
-                          <Line yAxisId="left" type="monotone" dataKey="afrActual_b" stroke="#f59e0b" name={`AFR (${compareAnalysis.filename})`} strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls={false} />
-                          <Line yAxisId="boost" type="monotone" dataKey="boost_b" stroke="#60a5fa" name="Boost B" strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls={false} />
-                        </>}
+                        {compareAnalysis && COMPARE_CHANNELS.filter(channel => compareChannels[channel.key]).map((channel) => (
+                          <Line key={channel.key} yAxisId={channel.yAxisId} type="monotone" dataKey={`${channel.key}_b`} stroke={channel.color} name={`${channel.label} (${compareAnalysis.filename})`} strokeWidth={1.5} strokeDasharray={channel.dashed ? '6 3' : '4 2'} dot={false} connectNulls={false} />
+                        ))}
+
+                        {hoverTime !== null && <ReferenceLine x={hoverTime} yAxisId="left" stroke="#94a3b8" strokeWidth={1} strokeDasharray="2 2" />}
 
                         {(() => {
                           const pt = analysis.chartData.find(p => p.isHpfpWarning);
