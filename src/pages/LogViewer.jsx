@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { MonitorPlay, UploadCloud, Search, Eye, EyeOff, FileText, RotateCcw, BarChart2, XCircle, Droplet } from 'lucide-react';
 import { getSettings } from '../utils/storage';
+import { parseViewerCsv } from '../utils/viewerCsv';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Brush,
@@ -14,34 +15,6 @@ const PALETTE = [
 ];
 
 function paletteColor(i) { return PALETTE[i % PALETTE.length]; }
-
-// ── Frontend CSV parser ────────────────────────────────────────────────────────
-function parseRow(line) {
-  const out = []; let cur = ''; let inQ = false;
-  for (const c of line) {
-    if (c === '"') { inQ = !inQ; }
-    else if (c === ',' && !inQ) { out.push(cur.trim()); cur = ''; }
-    else cur += c;
-  }
-  out.push(cur.trim());
-  return out;
-}
-
-function parseCSV(text) {
-  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter(l => l.trim());
-  if (lines.length < 2) return null;
-  const headers = parseRow(lines[0]);
-  if (headers.length < 2) return null;
-  const rows = [];
-  for (let i = 1; i < lines.length; i++) {
-    const vals = parseRow(lines[i]);
-    if (vals.length === 0) continue;
-    const row = {};
-    headers.forEach((h, j) => { row[h] = vals[j] ?? ''; });
-    rows.push(row);
-  }
-  return { headers, rows };
-}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const TIME_KEYWORDS = ['time', 'timestamp', 'elapsed', 'log time'];
@@ -168,7 +141,7 @@ const LogViewer = () => {
   const processFile = useCallback((file) => {
     const reader = new FileReader();
     reader.onload = (e) => {
-      const parsed = parseCSV(e.target.result);
+      const parsed = parseViewerCsv(e.target.result);
       if (!parsed) return;
       const { headers, rows } = parsed;
       const numericChannels = detectNumericChannels(headers, rows);

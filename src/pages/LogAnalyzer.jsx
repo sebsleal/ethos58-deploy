@@ -9,6 +9,7 @@ import { analyzeLog } from '../utils/logAnalyzer';
 import { saveRecentLog, getAnnotations, saveAnnotations } from '../utils/storage';
 import { trackEvent, trackError } from '../utils/telemetry';
 import { hapticSuccess, hapticWarning, hapticError } from '../utils/haptics';
+import { mergeCompareChartData } from '../utils/logCompare';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Legend, ReferenceLine, ReferenceDot, ScatterChart, Scatter, ZAxis,
@@ -237,17 +238,10 @@ const LogAnalyzer = () => {
     return <circle r={0} fill="none" />;
   };
 
-  const mergedChartData = React.useMemo(() => {
-    if (!analysis || !compareAnalysis) return analysis?.chartData || [];
-    const baseMap = {};
-    (analysis.chartData || []).forEach(pt => { baseMap[pt.time] = { ...pt }; });
-    (compareAnalysis.chartData || []).forEach(pt => {
-      if (!baseMap[pt.time]) baseMap[pt.time] = { time: pt.time };
-      baseMap[pt.time].afrActual_b  = pt.afrActual;
-      baseMap[pt.time].boost_b      = pt.boost;
-    });
-    return Object.values(baseMap).sort((a, b) => Number(a.time) - Number(b.time));
-  }, [analysis, compareAnalysis]);
+  const mergedChartData = React.useMemo(
+    () => mergeCompareChartData(analysis, compareAnalysis),
+    [analysis, compareAnalysis]
+  );
 
   return (
     <div className="space-y-6 animate-fade-in">
