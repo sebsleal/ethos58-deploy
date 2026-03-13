@@ -1,4 +1,5 @@
 import multer from 'multer';
+import { appendFile } from 'node:fs/promises';
 import { calculateBlend } from '../src/utils/blendMath.js';
 import { analyzeParsedLog } from '../src/utils/logAnalyzer.js';
 import { parseCsv as parseServerCsv } from './utils/csvParser.js';
@@ -69,6 +70,67 @@ function parseCarDetails(raw) {
   }
 
   return out;
+}
+
+
+
+const MAX_TELEMETRY_EVENTS_PER_REQUEST = 100;
+const MAX_TELEMETRY_EVENT_BYTES = 24 * 1024;
+
+function trimTelemetryEvent(event) {
+  if (!event || typeof event !== 'object') return null;
+  const normalized = {
+    id: typeof event.id === 'string' ? event.id.slice(0, 100) : undefined,
+    type: typeof event.type === 'string' ? event.type.slice(0, 40) : 'event',
+    name: typeof event.name === 'string' ? event.name.slice(0, 160) : 'unknown',
+    severity: typeof event.severity === 'string' ? event.severity.slice(0, 20) : 'info',
+    ts: Number.isFinite(Number(event.ts)) ? Number(event.ts) : Date.now(),
+    session_id: typeof event.session_id === 'string' ? event.session_id.slice(0, 120) : undefined,
+    app_version: typeof event.app_version === 'string' ? event.app_version.slice(0, 60) : undefined,
+    url: typeof event.url === 'string' ? event.url.slice(0, 500) : undefined,
+    user_agent: typeof event.user_agent === 'string' ? event.user_agent.slice(0, 500) : undefined,
+    data: event.data && typeof event.data === 'object' ? event.data : {},
+  };
+
+  const serialized = JSON.stringify(normalized);
+  if (serialized.length > MAX_TELEMETRY_EVENT_BYTES) {
+    normalized.data = { note: 'payload_truncated', original_bytes: serialized.length };
+  }
+
+  return normalized;
+}
+
+export async function telemetryIngestHandler(req, res) {
+  try {
+    const input = Array.isArray(req.body?.events) ? req.body.events : [];
+    if (input.length === 0) {
+      return sendError(res, 400, 'INVALID_TELEMETRY_PAYLOAD', 'Request body must include a non-empty events array.');
+    }
+
+    const trimmed = input
+      .slice(0, MAX_TELEMETRY_EVENTS_PER_REQUEST)
+      .map(trimTelemetryEvent)
+      .filter(Boolean);
+
+    if (!trimmed.length) {
+      return sendError(res, 400, 'INVALID_TELEMETRY_PAYLOAD', 'No valid telemetry events were provided.');
+    }
+
+    const lines = trimmed
+      .map(event => JSON.stringify({
+        ...event,
+        received_at: Date.now(),
+        source: req.body?.source || 'unknown',
+        remote_ip: req.ip,
+      }))
+      .join('\n') + '\n';
+
+    await appendFile('server/telemetry.ndjson', lines, 'utf8');
+
+    return res.json({ success: true, accepted: trimmed.length });
+  } catch (err) {
+    return sendError(res, 500, 'TELEMETRY_INGEST_FAILED', safeErrorMessage(err, 'Failed to ingest telemetry events.'));
+  }
 }
 
 export const uploadCsv = multer({

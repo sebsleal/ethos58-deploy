@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { analyzeLog } from '../utils/logAnalyzer';
 import { saveRecentLog, getAnnotations, saveAnnotations } from '../utils/storage';
-import { trackEvent, trackError } from '../utils/telemetry';
+import { trackEvent, trackUploadFailure, trackParserMismatch, trackPerformanceIssue, trackExportFailure } from '../utils/telemetry';
 import { hapticSuccess, hapticWarning, hapticError } from '../utils/haptics';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -110,21 +110,41 @@ const LogAnalyzer = () => {
           if (result?.status === 'Risk') hapticError();
           else if (result?.status === 'Caution') hapticWarning();
           else hapticSuccess();
+          const elapsedMs = Math.round(performance.now() - startedAt);
           trackEvent('log_analyzer_upload_succeeded', {
             filename: file.name, row_count: result?.row_count ?? 0,
-            elapsed_ms: Math.round(performance.now() - startedAt), status: result?.status ?? 'Unknown',
+            elapsed_ms: elapsedMs, status: result?.status ?? 'Unknown',
           });
+
+          if (result?.logFormat === 'Unknown') {
+            trackParserMismatch({
+              filename: file.name,
+              detected_columns: result?.detectedColumns,
+              row_count: result?.row_count ?? 0,
+            });
+          }
+
+          if ((result?.row_count ?? 0) >= 4000 || elapsedMs >= 2500) {
+            trackPerformanceIssue('log_analyzer_large_log_performance', {
+              filename: file.name,
+              row_count: result?.row_count ?? 0,
+              elapsed_ms: elapsedMs,
+              used_worker: Boolean(workerRef.current),
+            });
+          }
         }
       } catch (err) {
         if (!isCompare) {
           setError(err.message);
-          trackError('log_analyzer_upload_failed', err, { filename: file.name, elapsed_ms: Math.round(performance.now() - startedAt) });
+          trackUploadFailure(err, { source: 'log_analyzer', filename: file.name, elapsed_ms: Math.round(performance.now() - startedAt), is_compare: isCompare });
         }
       } finally {
         setter(false);
       }
     };
     reader.onerror = () => {
+      const readError = reader.error || new Error('Failed to read file.');
+      trackUploadFailure(readError, { source: 'file_reader', filename: file.name, is_compare: isCompare });
       if (isCompare) {
         setCompareLoading(false);
         return;
@@ -173,6 +193,10 @@ const LogAnalyzer = () => {
       link.click();
       trackEvent('chart_exported_png_downloaded', { filename: analysis?.filename });
     } catch (err) {
+      trackExportFailure(err, {
+        filename: analysis?.filename,
+        native_platform: Capacitor.isNativePlatform(),
+      });
       console.error('Export failed:', err);
     }
   };
