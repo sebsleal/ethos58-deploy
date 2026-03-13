@@ -128,11 +128,8 @@ export function clearActiveBlend() {
 const SETTINGS_DEFAULTS = {
   theme:          'system',
   units:          'US',
-  compactView:    false,
   downsampling:   'Original (All Data)',
-  defaultPreset:  'None (Clear)',
   lineThickness:  'Normal (1.5px)',
-  timeFormat:     'Elapsed (Seconds)',
   blendResultUnit: 'auto',
 };
 
