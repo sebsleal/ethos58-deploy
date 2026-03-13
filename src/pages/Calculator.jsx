@@ -40,6 +40,12 @@ const Calculator = () => {
   const [pumpOctane, setPumpOctane] = useState(93);
   const [pumpEthanol, setPumpEthanol] = useState(0);
   const [volumeUnit, setVolumeUnit] = useState(() => (getSettings().units === 'Metric' ? 'L' : 'gal'));
+  const [tankCapacityUnit, setTankCapacityUnit] = useState(() => {
+    if (plannerDefaults.tankCapacityUnit === 'L' || plannerDefaults.tankCapacityUnit === 'gal') {
+      return plannerDefaults.tankCapacityUnit;
+    }
+    return getSettings().units === 'Metric' ? 'L' : 'gal';
+  });
   const [resultVolumeUnit, setResultVolumeUnit] = useState(() => {
     const settings = getSettings();
     if (settings.blendResultUnit === 'L' || settings.blendResultUnit === 'gal') return settings.blendResultUnit;
@@ -106,8 +112,9 @@ const Calculator = () => {
       e85Price: stationE85Price,
       pumpPrice: stationPumpPrice,
       tankCount,
+      tankCapacityUnit,
     });
-  }, [calibrationInput, calibratedPumpE, stationE85Price, stationPumpPrice, tankCount]);
+  }, [calibrationInput, calibratedPumpE, stationE85Price, stationPumpPrice, tankCount, tankCapacityUnit]);
 
   const toDisplayVolume = (gallons) => {
     if (gallons === '' || gallons === null || gallons === undefined) return '';
@@ -122,6 +129,19 @@ const Calculator = () => {
     return parsed;
   };
 
+  const toDisplayTankCapacity = (gallons) => {
+    if (gallons === '' || gallons === null || gallons === undefined) return '';
+    if (tankCapacityUnit === 'L') return roundTo(Number(gallons) * LITERS_PER_GALLON, 2);
+    return gallons;
+  };
+
+  const fromDisplayTankCapacity = (value) => {
+    const parsed = parseFloat(value);
+    if (Number.isNaN(parsed)) return '';
+    if (tankCapacityUnit === 'L') return parsed / LITERS_PER_GALLON;
+    return parsed;
+  };
+
   const formatResultVolume = (gallons) => {
     if (gallons === null || gallons === undefined || Number.isNaN(Number(gallons))) return '—';
     if (resultVolumeUnit === 'L') return roundTo(Number(gallons) * LITERS_PER_GALLON, 2);
@@ -129,6 +149,7 @@ const Calculator = () => {
   };
 
   const volumeLabel = volumeUnit === 'L' ? 'L' : 'gal';
+  const tankCapacityLabel = tankCapacityUnit === 'L' ? 'L' : 'gal';
   const resultVolumeLabel = resultVolumeUnit === 'L' ? 'L' : 'gal';
 
   const handleVolumeUnitChange = (unit) => {
@@ -141,10 +162,18 @@ const Calculator = () => {
     saveSetting('blendResultUnit', unit);
   };
 
+  const handleTankCapacityUnitChange = (unit) => {
+    setTankCapacityUnit(unit);
+  };
+
   const handleChange = (e) => {
     const { name, value } = e.target;
-    if (name === 'currentFuel' || name === 'tankSize') {
+    if (name === 'currentFuel') {
       setFormData(prev => ({ ...prev, [name]: fromDisplayVolume(value) }));
+      return;
+    }
+    if (name === 'tankSize') {
+      setFormData(prev => ({ ...prev, [name]: fromDisplayTankCapacity(value) }));
       return;
     }
     const parsed = parseFloat(value);
@@ -324,6 +353,8 @@ const Calculator = () => {
     return { totalE85 };
   }, [tripPlan]);
 
+  const plannerPumpEthanol = calibratedPumpE ?? pumpEthanol;
+
   return (
     <div className="space-y-6 animate-fade-in">
       <header className="mb-6 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
@@ -420,9 +451,13 @@ const Calculator = () => {
           resultVolumeUnit={resultVolumeUnit}
           handleResultVolumeUnitChange={handleResultVolumeUnitChange}
           volumeLabel={volumeLabel}
+          tankCapacityLabel={tankCapacityLabel}
           formData={formData}
           toDisplayVolume={toDisplayVolume}
+          toDisplayTankCapacity={toDisplayTankCapacity}
           handleChange={handleChange}
+          handleTankCapacityUnitChange={handleTankCapacityUnitChange}
+          tankCapacityUnit={tankCapacityUnit}
           calculate={calculate}
           error={error}
           result={result}
@@ -451,17 +486,48 @@ const Calculator = () => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-white/5 rounded-2xl p-6 shadow-sm dark:shadow-none space-y-6">
             <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-gray-100 mb-1">Planner Inputs</h2>
+              <p className="text-sm text-slate-500 dark:text-gray-400">These are the core values Fuel Planner uses. Set them here first so cost comparisons and trip plans are based on the right tank state.</p>
+              <div className="mt-4 rounded-2xl border border-brand-200/70 dark:border-brand-500/20 bg-brand-50/70 dark:bg-brand-500/5 p-4 space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <InputGroup label={`Fuel Currently In Tank (${volumeLabel})`} name="currentFuel" value={toDisplayVolume(formData.currentFuel)} onChange={handleChange} step="0.1" helpText="How much fuel is in the car right now before you start filling." />
+                  <InputGroup label="Current Ethanol %" name="currentE" value={formData.currentE} onChange={handleChange} step="1" helpText="Use the blend you estimate is currently in the tank, like E10 or E30." />
+                  <InputGroup label="Target Ethanol %" name="targetE" value={formData.targetE} onChange={handleChange} step="1" helpText="The final blend you want to end up with after the fill." />
+                  <TankCapacityInput
+                    value={toDisplayTankCapacity(formData.tankSize)}
+                    onChange={handleChange}
+                    unit={tankCapacityUnit}
+                    onUnitChange={handleTankCapacityUnitChange}
+                    unitLabel={tankCapacityLabel}
+                    helpText="Total usable tank capacity. You can enter this in gallons or litres independently."
+                  />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-slate-600 dark:text-gray-300">
+                  <div className="rounded-xl border border-slate-200 dark:border-white/10 bg-white/80 dark:bg-zinc-950/60 px-3 py-2">
+                    Cost compare uses: current tank state above, target blend, pump ethanol, and station prices.
+                  </div>
+                  <div className="rounded-xl border border-slate-200 dark:border-white/10 bg-white/80 dark:bg-zinc-950/60 px-3 py-2">
+                    Trip plan uses: current tank state above, target blend, pump ethanol, and number of future tanks.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div>
               <h2 className="text-base font-bold text-slate-900 dark:text-gray-100 mb-1">Pump Ethanol Calibration</h2>
-              <p className="text-sm text-slate-500 dark:text-gray-400">Paste tester readings (comma-separated, e.g. 72, 75, 73).</p>
+              <p className="text-sm text-slate-500 dark:text-gray-400">Optional. If you tested the pump with a vial, paste 2-4 readings and Ethos will average them. If you skip this, the planner uses the Pump Ethanol setting from Blend Calculator.</p>
               <div className="flex gap-2 mt-3">
                 <input type="text" value={calibrationInput} onChange={e => setCalibrationInput(e.target.value)} className="flex-1 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-sm" placeholder="72, 75, 73" />
                 <button onClick={handleCalibratePump} className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-900 dark:bg-brand-500 text-white">Calibrate</button>
               </div>
-              {calibratedPumpE !== null && <p className="text-xs mt-2 text-brand-500 font-semibold">Calibrated pump ethanol: E{calibratedPumpE}</p>}
+              {calibratedPumpE !== null
+                ? <p className="text-xs mt-2 text-brand-500 font-semibold">Using calibrated pump ethanol: E{calibratedPumpE}</p>
+                : <p className="text-xs mt-2 text-slate-500 dark:text-gray-400">No calibration saved yet. Planner will currently use E{pumpEthanol} from Blend Calculator.</p>}
             </div>
 
             <div>
               <h2 className="text-base font-bold text-slate-900 dark:text-gray-100 mb-1">Station Presets</h2>
+              <p className="text-sm text-slate-500 dark:text-gray-400">Optional. Save a station name plus current E85 and pump-gas prices so the planner can compare fill cost across locations.</p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3">
                 <input type="text" placeholder="Station name" value={stationName} onChange={e => setStationName(e.target.value)} className="bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-sm" />
                 <input type="number" step="0.01" placeholder="E85 $/gal" value={stationE85Price} onChange={e => setStationE85Price(parseFloat(e.target.value) || 0)} className="bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-sm" />
@@ -469,7 +535,7 @@ const Calculator = () => {
               </div>
               <div className="flex gap-2 mt-3">
                 <button onClick={handleSaveStation} className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-900 dark:bg-brand-500 text-white">Save Station</button>
-                <button onClick={runCostOptimization} className="px-3 py-2 rounded-xl text-xs font-bold border border-slate-200 dark:border-white/10 text-slate-700 dark:text-gray-200">Optimize Fill Cost</button>
+                <button onClick={runCostOptimization} className="px-3 py-2 rounded-xl text-xs font-bold border border-slate-200 dark:border-white/10 text-slate-700 dark:text-gray-200">Compare Fill Cost</button>
               </div>
               {stationNames.length > 0 && (
                 <div className="mt-3 space-y-2">
@@ -486,7 +552,7 @@ const Calculator = () => {
 
             <div>
               <h2 className="text-base font-bold text-slate-900 dark:text-gray-100 mb-1">Trip Planner</h2>
-              <p className="text-sm text-slate-500 dark:text-gray-400">How much E85 to add over the next N tanks.</p>
+              <p className="text-sm text-slate-500 dark:text-gray-400">Required input: how many future tanks you want to plan. Ethos will use the planner inputs above and the current pump ethanol value to estimate each fill.</p>
               <div className="flex gap-2 mt-3">
                 <input type="number" min="1" max="20" value={tankCount} onChange={e => setTankCount(parseInt(e.target.value, 10) || 1)} className="w-24 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-sm" />
                 <button onClick={runTripPlan} className="px-3 py-2 rounded-xl text-xs font-bold border border-slate-200 dark:border-white/10 text-slate-700 dark:text-gray-200">Build Plan</button>
@@ -496,6 +562,12 @@ const Calculator = () => {
 
           <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-white/5 rounded-2xl p-6 shadow-sm dark:shadow-none space-y-5">
             <h2 className="text-base font-bold text-slate-900 dark:text-gray-100">Fuel Planner Output</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <div className="rounded-xl border border-slate-200 dark:border-white/10 px-3 py-2 text-slate-600 dark:text-gray-300">Current tank: {toDisplayVolume(formData.currentFuel)} {volumeLabel} at E{formData.currentE}</div>
+              <div className="rounded-xl border border-slate-200 dark:border-white/10 px-3 py-2 text-slate-600 dark:text-gray-300">Target / tank size: E{formData.targetE} in a {toDisplayTankCapacity(formData.tankSize)} {tankCapacityLabel} tank</div>
+              <div className="rounded-xl border border-slate-200 dark:border-white/10 px-3 py-2 text-slate-600 dark:text-gray-300">Pump ethanol used: E{plannerPumpEthanol}</div>
+              <div className="rounded-xl border border-slate-200 dark:border-white/10 px-3 py-2 text-slate-600 dark:text-gray-300">Trip length: {tankCount} tank{tankCount === 1 ? '' : 's'}</div>
+            </div>
             {fillCostResult?.length > 0 && (
               <div>
                 <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-gray-400 mb-2 flex items-center gap-1"><CalculatorIcon size={13} /> Cost per Fill</h3>
@@ -526,8 +598,14 @@ const Calculator = () => {
             )}
 
             {!fillCostResult?.length && !tripPlan.length && (
-              <div className="text-center py-14 text-slate-400 dark:text-gray-500">
-                Configure calibration, stations, and tank count to generate a plan.
+              <div className="rounded-2xl border border-dashed border-slate-200 dark:border-white/10 py-10 px-6 text-slate-500 dark:text-gray-400">
+                <p className="text-sm font-semibold text-slate-700 dark:text-gray-200 mb-3">How to use Fuel Planner</p>
+                <ol className="space-y-2 text-sm list-decimal list-inside">
+                  <li>Set your current fuel, current ethanol, target ethanol, and tank capacity in Planner Inputs.</li>
+                  <li>Optionally calibrate pump ethanol if you tested the fuel.</li>
+                  <li>Add station prices if you want a fill-cost comparison.</li>
+                  <li>Use Build Plan for upcoming tanks or Compare Fill Cost for station pricing.</li>
+                </ol>
               </div>
             )}
           </div>
@@ -537,7 +615,7 @@ const Calculator = () => {
   );
 };
 
-const BlendPane = ({ precisionMode, setPrecisionMode, pumpOctane, setPumpOctane, pumpEthanol, setPumpEthanol, resultVolumeUnit, handleResultVolumeUnitChange, volumeLabel, formData, toDisplayVolume, handleChange, calculate, error, result, formatResultVolume, resultVolumeLabel }) => (
+const BlendPane = ({ precisionMode, setPrecisionMode, pumpOctane, setPumpOctane, pumpEthanol, setPumpEthanol, resultVolumeUnit, handleResultVolumeUnitChange, volumeLabel, tankCapacityLabel, formData, toDisplayVolume, toDisplayTankCapacity, handleChange, handleTankCapacityUnitChange, tankCapacityUnit, calculate, error, result, formatResultVolume, resultVolumeLabel }) => (
   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
     <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-white/5 rounded-2xl p-6 shadow-sm dark:shadow-none">
       <div className="flex justify-between items-center mb-4 border-b border-slate-100 dark:border-white/5 pb-4">
@@ -582,7 +660,13 @@ const BlendPane = ({ precisionMode, setPrecisionMode, pumpOctane, setPumpOctane,
         <InputGroup label={`Current Fuel in Tank (${volumeLabel})`} name="currentFuel" value={toDisplayVolume(formData.currentFuel)} onChange={handleChange} step="0.1" />
         <InputGroup label="Current Ethanol %" name="currentE" value={formData.currentE} onChange={handleChange} step="1" />
         <InputGroup label="Target Ethanol %" name="targetE" value={formData.targetE} onChange={handleChange} step="1" />
-        <InputGroup label={`Tank Capacity (${volumeLabel})`} name="tankSize" value={toDisplayVolume(formData.tankSize)} onChange={handleChange} step="0.1" />
+        <TankCapacityInput
+          value={toDisplayTankCapacity(formData.tankSize)}
+          onChange={handleChange}
+          unit={tankCapacityUnit}
+          onUnitChange={handleTankCapacityUnitChange}
+          unitLabel={tankCapacityLabel}
+        />
       </div>
       <button onClick={calculate} className="w-full mt-8 bg-slate-900 dark:bg-brand-500 hover:bg-slate-800 dark:hover:bg-brand-400 text-white py-3 rounded-xl font-bold tracking-wide transition-all flex justify-center items-center gap-2 shadow-sm">CALCULATE BLEND</button>
       {error && (
@@ -661,10 +745,37 @@ const RefuelPane = ({ volumeLabel, formData, toDisplayVolume, handleChange, refu
   </div>
 );
 
-const InputGroup = ({ label, name, value, onChange, step }) => (
+const InputGroup = ({ label, name, value, onChange, step, helpText = null }) => (
   <div>
     <label className="block text-xs font-bold text-slate-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide">{label}</label>
     <input type="number" name={name} value={value} onChange={onChange} step={step} className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-white/10 focus:border-brand-400 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-400/30 rounded-xl px-4 py-2.5 text-slate-900 dark:text-gray-100 text-sm outline-none transition-all placeholder-slate-300 dark:placeholder-gray-600" placeholder="0.0" />
+    {helpText && <p className="mt-1.5 text-xs text-slate-500 dark:text-gray-400">{helpText}</p>}
+  </div>
+);
+
+const TankCapacityInput = ({ value, onChange, unit, onUnitChange, unitLabel, helpText = null }) => (
+  <div>
+    <div className="flex items-center justify-between gap-3 mb-1.5">
+      <label className="block text-xs font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wide">Tank Capacity ({unitLabel})</label>
+      <div className="flex rounded-lg border border-slate-200 dark:border-white/10 overflow-hidden">
+        <button
+          type="button"
+          onClick={() => onUnitChange('gal')}
+          className={`px-3 py-1 text-[11px] font-bold transition-colors ${unit === 'gal' ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-white dark:bg-zinc-950 text-slate-500 dark:text-gray-400 hover:bg-slate-50'}`}
+        >
+          Gallons
+        </button>
+        <button
+          type="button"
+          onClick={() => onUnitChange('L')}
+          className={`px-3 py-1 text-[11px] font-bold transition-colors ${unit === 'L' ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-white dark:bg-zinc-950 text-slate-500 dark:text-gray-400 hover:bg-slate-50'}`}
+        >
+          Litres
+        </button>
+      </div>
+    </div>
+    <input type="number" name="tankSize" value={value} onChange={onChange} step="0.1" className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-white/10 focus:border-brand-400 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-400/30 rounded-xl px-4 py-2.5 text-slate-900 dark:text-gray-100 text-sm outline-none transition-all placeholder-slate-300 dark:placeholder-gray-600" placeholder="0.0" />
+    {helpText && <p className="mt-1.5 text-xs text-slate-500 dark:text-gray-400">{helpText}</p>}
   </div>
 );
 
