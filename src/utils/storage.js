@@ -65,6 +65,7 @@ export function saveRecentLog(analysis) {
     engine:      analysis.carDetails?.engine  || '—',
     ethanol:     analysis.carDetails?.ethanol ?? '—',
     tune:        analysis.carDetails?.tuneStage || '—',
+    ambientTemp: analysis.metrics?.iat?.value ?? null,
     afr:         analysis.metrics?.afr?.actual ?? null,
     hpfp:        analysis.metrics?.hpfp?.actual ?? null,
     rowCount:    analysis.row_count ?? null,

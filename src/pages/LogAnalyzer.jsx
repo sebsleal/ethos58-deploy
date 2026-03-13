@@ -35,6 +35,8 @@ const LogAnalyzer = () => {
   const nextRequestIdRef = useRef(1);
   const unitPref = localStorage.getItem('ethos_units') || 'US';
   const chartRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const folderInputRef = useRef(null);
 
   const [compareAnalysis, setCompareAnalysis] = useState(null);
   const [compareLoading, setCompareLoading] = useState(false);
@@ -89,6 +91,56 @@ const LogAnalyzer = () => {
   };
 
   const handleFileChange = (e) => { if (e.target.files?.[0]) processFile(e.target.files[0]); };
+
+  const readFileAsText = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => resolve(String(event.target?.result || ''));
+    reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+    reader.readAsText(file);
+  });
+
+  const processBatchFiles = async (files) => {
+    const csvFiles = Array.from(files || []).filter((file) => /\.csv$/i.test(file.name));
+    if (!csvFiles.length) {
+      setError('No CSV files found in selected folder.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    let lastResult = null;
+    let importedCount = 0;
+
+    for (const file of csvFiles) {
+      try {
+        const csvText = await readFileAsText(file);
+        const result = await analyzeViaWorker(csvText, file.name, carDetails);
+        saveRecentLog(result);
+        lastResult = result;
+        importedCount += 1;
+      } catch (err) {
+        trackError('log_analyzer_batch_upload_failed', err, { filename: file.name });
+      }
+    }
+
+    if (lastResult) {
+      setAnalysis(lastResult);
+      setAnnotations(getAnnotations(lastResult.filename + '_' + lastResult.row_count));
+      trackEvent('log_analyzer_batch_upload_succeeded', { imported_count: importedCount, total_count: csvFiles.length });
+      hapticSuccess();
+    } else {
+      setError('Could not analyze any CSV files from this batch.');
+    }
+
+    setLoading(false);
+  };
+
+  const handleFolderChange = (e) => {
+    if (e.target.files?.length) processBatchFiles(e.target.files);
+    e.target.value = '';
+  };
+
 
   const processFile = (file, isCompare = false) => {
     const startedAt = performance.now();
@@ -339,10 +391,24 @@ const LogAnalyzer = () => {
               </div>
               <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200">Drag & Drop Datalog CSV</h3>
               <p className="text-gray-400 mt-1 text-sm text-center max-w-sm">Supports MHD and bootmod3 exported CSV files.</p>
-              <label className="mt-6 cursor-pointer bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 border border-gray-300 dark:border-white/10 text-gray-800 dark:text-gray-200 px-5 py-2 rounded-md text-sm font-medium transition-all relative z-10">
-                Browse Files
-                <input type="file" className="hidden" accept=".csv,text/csv,text/plain,application/vnd.ms-excel" onChange={handleFileChange} />
-              </label>
+              <div className="mt-6 flex flex-col sm:flex-row items-center gap-2 relative z-10">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 border border-gray-300 dark:border-white/10 text-gray-800 dark:text-gray-200 px-5 py-2 rounded-md text-sm font-medium transition-all"
+                >
+                  Browse File
+                </button>
+                <button
+                  type="button"
+                  onClick={() => folderInputRef.current?.click()}
+                  className="bg-brand-50 dark:bg-brand-500/10 hover:bg-brand-100 dark:hover:bg-brand-500/20 border border-brand-200 dark:border-brand-500/20 text-brand-700 dark:text-brand-300 px-5 py-2 rounded-md text-sm font-medium transition-all"
+                >
+                  Import Folder
+                </button>
+                <input ref={fileInputRef} type="file" className="hidden" accept=".csv,text/csv,text/plain,application/vnd.ms-excel" onChange={handleFileChange} />
+                <input ref={folderInputRef} type="file" className="hidden" webkitdirectory="" directory="" multiple onChange={handleFolderChange} />
+              </div>
             </div>
           </div>
         </div>
