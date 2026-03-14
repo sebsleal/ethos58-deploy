@@ -1,5 +1,18 @@
 [
   {
+    "version": "2.2.0",
+    "date": "2026-03-13",
+    "title": "SaaS Redesign + iOS Status Bar & Haptics Fixes",
+    "changes": [
+      { "type": "new", "platform": "both", "text": "Full UI overhaul with Linear/Vercel-inspired dark theme: squared borders, teal accents, and a cleaner design system throughout" },
+      { "type": "new", "platform": "both", "text": "Redesigned sidebar with grouped navigation (Overview, Analysis, Fuel, System), collapsible 60px icon-only mode, and BETA badge on Log Analyzer" },
+      { "type": "fixed", "platform": "ios", "text": "Mobile header now sits below the status bar using env(safe-area-inset-top), so the hamburger menu no longer overlaps the clock" },
+      { "type": "fixed", "platform": "ios", "text": "Haptics import timeout added so a slow Capacitor plugin startup can no longer block the pull-to-refresh callback and leave the Refreshing banner stuck permanently" },
+      { "type": "fixed", "platform": "ios", "text": "Pull-to-refresh now has a 5-second safety timeout so the refresh indicator always clears even if the data fetch stalls" },
+      { "type": "improved", "platform": "both", "text": "Tune Health Score card redesigned with stacked ring-plus-label layout to avoid text truncation when breakdown data is present" }
+    ]
+  },
+  {
     "version": "2.1.2",
     "date": "2026-03-13",
     "title": "Calculator Result Unit Controls",
