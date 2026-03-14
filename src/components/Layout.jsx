@@ -116,7 +116,7 @@ export default function Layout({ children }) {
       </aside>
 
       {/* ── Main Area ────────────────────────────── */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
 
         {/* Mobile top bar */}
         <div className="app-rail border-b px-4 pb-3 md:hidden" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 0.75rem)' }}>
