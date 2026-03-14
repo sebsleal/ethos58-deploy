@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { X, Sparkles, Zap, ArrowUpCircle } from 'lucide-react';
 import { setLastSeenVersion } from '../utils/storage';
+import { useSwipeDismiss } from '../hooks/useSwipeDismiss';
 
 const TYPE_STYLES = {
   new:      { label: 'New',      cls: 'bg-brand-500/10 text-brand-500 dark:text-brand-400' },
@@ -17,8 +18,7 @@ const PLATFORM_STYLES = {
 export default function Changelog({ currentVersion, onClose }) {
   const [entries, setEntries] = useState([]);
   const [platformFilter, setPlatformFilter] = useState('all');
-  const touchStartYRef = useRef(null);
-  const [dragDelta, setDragDelta] = useState(0);
+  const dialogRef = useRef(null);
 
   useEffect(() => {
     fetch('/CHANGELOG.json')
@@ -32,22 +32,34 @@ export default function Changelog({ currentVersion, onClose }) {
     onClose();
   }
 
-  const handleSwipeStart = (e) => {
-    touchStartYRef.current = e.touches[0].clientY;
-    setDragDelta(0);
-  };
+  const { dragDelta, swipeBind } = useSwipeDismiss(handleClose);
 
-  const handleSwipeMove = (e) => {
-    if (touchStartYRef.current === null) return;
-    const delta = e.touches[0].clientY - touchStartYRef.current;
-    setDragDelta(Math.max(0, delta));
-  };
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return undefined;
 
-  const handleSwipeEnd = () => {
-    if (dragDelta > 60) handleClose();
-    touchStartYRef.current = null;
-    setDragDelta(0);
-  };
+    const focusable = dialog.querySelector('button');
+    focusable?.focus();
+
+    const handleKeyDown = (event) => {
+      if (event.key !== 'Tab') return;
+      const nodes = dialog.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      const focusableNodes = Array.from(nodes).filter((node) => !node.hasAttribute('disabled'));
+      if (!focusableNodes.length) return;
+      const first = focusableNodes[0];
+      const last = focusableNodes[focusableNodes.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    dialog.addEventListener('keydown', handleKeyDown);
+    return () => dialog.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const latest = entries[0];
   const filteredEntries = entries
@@ -64,43 +76,45 @@ export default function Changelog({ currentVersion, onClose }) {
     .filter(entry => entry.changes.length > 0);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4 pb-4 sm:pb-0">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/50 backdrop-blur-sm px-4 pb-4 sm:pb-0">
       <div
-        className="bg-white dark:bg-[#0f0f11] border border-gray-200 dark:border-zinc-800 rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col overflow-hidden"
+        ref={dialogRef}
+        className="surface-panel animate-modal-in flex max-h-[82vh] w-full max-w-lg flex-col overflow-hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-label="What is new in Ethos58"
         style={{
           transform: dragDelta > 0 ? `translateY(${Math.min(dragDelta, 140)}px)` : 'translateY(0)',
           transition: dragDelta > 0 ? 'none' : 'transform 0.25s ease',
         }}
       >
         <div
-          className="pt-2 pb-1 flex justify-center cursor-grab active:cursor-grabbing"
-          onTouchStart={handleSwipeStart}
-          onTouchMove={handleSwipeMove}
-          onTouchEnd={handleSwipeEnd}
+          className="pt-3 pb-1 flex justify-center cursor-grab active:cursor-grabbing"
+          {...swipeBind}
         >
-          <span className="h-1 w-12 rounded-full bg-gray-300 dark:bg-zinc-700" />
+          <span className="h-1 w-12 rounded-full bg-slate-300/90 dark:bg-white/12" />
         </div>
 
         {/* Header */}
-        <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-gray-100 dark:border-zinc-800 shrink-0">
+        <div className="flex items-center justify-between px-6 pt-4 pb-4 border-b app-divider shrink-0">
           <div className="flex items-center gap-2">
-            <div className="bg-brand-500/10 p-1.5 rounded-lg">
+            <div className="rounded-xl border border-brand-500/20 bg-brand-500/10 p-2">
               <Sparkles size={16} className="text-brand-500" />
             </div>
             <div>
-              <h2 className="text-sm font-bold text-gray-900 dark:text-white">What's New</h2>
+              <h2 className="text-base font-semibold app-heading">What's New</h2>
               {latest && (
-                <p className="text-xs text-gray-400 dark:text-zinc-500">Version {latest.version}</p>
+                <p className="text-xs app-muted">Version {latest.version}</p>
               )}
             </div>
           </div>
-          <button onClick={handleClose} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors">
+          <button onClick={handleClose} className="app-icon-button p-2" aria-label="Close update log">
             <X size={16} />
           </button>
         </div>
 
-        <div className="px-5 py-3 border-b border-gray-100 dark:border-zinc-800 shrink-0">
-          <div className="inline-flex rounded-lg border border-gray-200 dark:border-zinc-700 overflow-hidden">
+        <div className="px-6 py-3 border-b app-divider shrink-0">
+          <div className="inline-flex rounded-full border app-divider overflow-hidden bg-[var(--app-card-inset)]">
             {[
               { id: 'all', label: 'All' },
               { id: 'web', label: 'Web' },
@@ -109,7 +123,8 @@ export default function Changelog({ currentVersion, onClose }) {
               <button
                 key={tab.id}
                 onClick={() => setPlatformFilter(tab.id)}
-                className={`px-3 py-1.5 text-xs font-semibold transition-colors ${platformFilter === tab.id ? 'bg-brand-500 text-white' : 'bg-white dark:bg-[#0f0f11] text-gray-500 dark:text-zinc-400 hover:bg-gray-50 dark:hover:bg-zinc-800'}`}
+                className={`px-4 py-2 text-xs font-semibold transition-colors ${platformFilter === tab.id ? 'bg-brand-500 text-white' : 'text-[var(--app-text-muted)] hover:text-[var(--app-heading)]'}`}
+                aria-pressed={platformFilter === tab.id}
               >
                 {tab.label}
               </button>
@@ -118,22 +133,22 @@ export default function Changelog({ currentVersion, onClose }) {
         </div>
 
         {/* Content */}
-        <div className="overflow-y-auto flex-1 px-5 py-4 space-y-6">
+        <div className="overflow-y-auto flex-1 px-6 py-5 space-y-6">
           {filteredEntries.length === 0 && (
-            <div className="text-center py-12 text-sm text-gray-500 dark:text-zinc-400">
+            <div className="text-center py-12 text-sm app-muted">
               No updates in this platform filter yet.
             </div>
           )}
           {filteredEntries.map((entry, idx) => (
-            <div key={entry.version}>
+            <div key={entry.version} className="surface-inset p-4">
               <div className="flex items-center gap-2 mb-3">
                 {idx === 0 ? (
                   <Zap size={14} className="text-brand-500 shrink-0" />
                 ) : (
-                  <ArrowUpCircle size={14} className="text-gray-400 dark:text-zinc-600 shrink-0" />
+                  <ArrowUpCircle size={14} className="app-muted shrink-0" />
                 )}
-                <p className="text-xs font-bold text-gray-900 dark:text-white">{entry.version} — {entry.title}</p>
-                <p className="text-xs text-gray-400 dark:text-zinc-600 ml-auto shrink-0">{entry.date}</p>
+                <p className="text-xs font-bold app-heading">{entry.version} — {entry.title}</p>
+                <p className="text-xs app-muted ml-auto shrink-0">{entry.date}</p>
               </div>
               <ul className="space-y-2">
                 {entry.changes.map((c, i) => {
@@ -145,7 +160,7 @@ export default function Changelog({ currentVersion, onClose }) {
                       <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0 mt-0.5 ${style.cls}`}>
                         {style.label}
                       </span>
-                      <span className="text-xs text-gray-700 dark:text-zinc-300 flex-1">{c.text}</span>
+                      <span className="text-xs flex-1 app-heading">{c.text}</span>
                       <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0 mt-0.5 ${platformStyle.cls}`}>
                         {platformStyle.label}
                       </span>
@@ -158,10 +173,10 @@ export default function Changelog({ currentVersion, onClose }) {
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-4 border-t border-gray-100 dark:border-zinc-800 shrink-0">
+        <div className="px-6 py-4 border-t app-divider shrink-0">
           <button
             onClick={handleClose}
-            className="w-full py-2.5 bg-brand-500 hover:bg-brand-600 text-white rounded-xl text-sm font-semibold transition-colors"
+            className="w-full py-3 bg-brand-500 hover:bg-brand-600 text-white rounded-[1rem] text-sm font-semibold transition-colors"
           >
             Got it
           </button>

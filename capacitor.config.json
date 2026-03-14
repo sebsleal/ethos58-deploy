@@ -7,9 +7,9 @@
   },
   "plugins": {
     "SplashScreen": {
-      "launchShowDuration": 1800,
+      "launchShowDuration": 1500,
       "launchAutoHide": true,
-      "backgroundColor": "#0F172A",
+      "backgroundColor": "#09090b",
       "showSpinner": false
     },
     "StatusBar": {

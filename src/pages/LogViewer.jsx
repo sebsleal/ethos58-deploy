@@ -3,6 +3,7 @@ import { MonitorPlay, UploadCloud, Search, Eye, EyeOff, FileText, RotateCcw, Bar
 import { useLocation } from 'react-router-dom';
 import { getSettings } from '../utils/storage';
 import { parseViewerCsv } from '../utils/viewerCsv';
+import { PageHeader } from '../components/ui';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Brush,
@@ -112,7 +113,7 @@ const LINE_WIDTH_MAP = {
 function CustomTooltip({ active, payload }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-white dark:bg-surface-200 border border-gray-300 dark:border-white/10 rounded-lg p-3 shadow-xl text-xs min-w-[200px] backdrop-blur-md">
+    <div className="app-chart-tooltip min-w-[200px] p-3 text-xs">
       {payload.map(entry => {
         const ch = entry.dataKey.replace(/_norm$/, '');
         const raw = entry.payload[`${ch}_raw`];
@@ -120,8 +121,8 @@ function CustomTooltip({ active, payload }) {
         return (
           <div key={ch} className="flex items-center gap-2 py-1">
             <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: entry.stroke, boxShadow: `0 0 6px ${entry.stroke}80` }} />
-            <span className="text-gray-400 dark:text-gray-400 font-medium truncate flex-1 pr-4">{ch}</span>
-            <span className="font-bold text-gray-900 dark:text-gray-100 shrink-0">{fmt(raw)}</span>
+            <span className="app-muted font-medium truncate flex-1 pr-4">{ch}</span>
+            <span className="app-heading font-bold shrink-0">{fmt(raw)}</span>
           </div>
         );
       })}
@@ -136,12 +137,12 @@ const LogViewer = () => {
   const [selected, setSelected] = useState(new Set());
   const [dragActive, setDragActive] = useState(false);
   const [search, setSearch] = useState('');
-  const settings = getSettings();
+  const [settings] = useState(getSettings);
   const maxPoints = DOWNSAMPLING_MAP[settings.downsampling] ?? 800;
   const lineWidth = LINE_WIDTH_MAP[settings.lineThickness] ?? 1.5;
 
   const processCsvText = useCallback((csvText, filename = 'Imported Log.csv') => {
-    const parsed = parseCSV(csvText);
+    const parsed = parseViewerCsv(csvText);
     if (!parsed) return;
     const { headers, rows } = parsed;
     const numericChannels = detectNumericChannels(headers, rows);
@@ -168,27 +169,6 @@ const LogViewer = () => {
     const reader = new FileReader();
     reader.onload = (e) => {
       processCsvText(e.target.result, file.name);
-      const parsed = parseViewerCsv(e.target.result);
-      if (!parsed) return;
-      const { headers, rows } = parsed;
-      const numericChannels = detectNumericChannels(headers, rows);
-      const timeCol = detectTimeColumn(headers);
-      const stats = computeStats(numericChannels, rows);
-      const sampled = Number.isFinite(maxPoints) ? downsample(rows, maxPoints) : rows;
-
-      const colors = {};
-      numericChannels.forEach((ch, i) => { colors[ch] = paletteColor(i); });
-
-      const autoSel = new Set(
-        numericChannels
-          .filter(ch => AUTO_KEYWORDS.some(kw => ch.toLowerCase().includes(kw)))
-          .slice(0, 6)
-      );
-      if (autoSel.size === 0) numericChannels.slice(0, 4).forEach(ch => autoSel.add(ch));
-
-      setFileData({ filename: file.name, rows: sampled, numericChannels, timeCol, stats, colors });
-      setSelected(autoSel);
-      setSearch('');
     };
     reader.readAsText(file);
   }, [processCsvText]);
@@ -238,46 +218,44 @@ const LogViewer = () => {
     });
   }, [fileData, selected]);
 
-  const filteredChannels = fileData
-    ? fileData.numericChannels.filter(ch => ch.toLowerCase().includes(search.toLowerCase()))
-    : [];
+  const filteredChannels = useMemo(() => (
+    fileData
+      ? fileData.numericChannels.filter(ch => ch.toLowerCase().includes(search.toLowerCase()))
+      : []
+  ), [fileData, search]);
 
   // ── Upload view ──────────────────────────────────────────────────────────────
   if (!fileData) {
     return (
       <div className="space-y-6 animate-fade-in p-8 md:p-12 max-w-6xl mx-auto h-full">
-        <header className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-3">
-            <MonitorPlay className="text-brand-400" size={32} />
-            Log Viewer
-          </h1>
-          <p className="text-gray-400 dark:text-gray-400 mt-2">
-            Visualize any BM3 or MHD CSV datalog — every channel, fully interactive.
-          </p>
-        </header>
+        <PageHeader
+          eyebrow="Analysis"
+          title="Log Viewer"
+          description="Visualize any BM3 or MHD CSV datalog with a cleaner layered canvas, preserved theme support, and tighter chart framing."
+        />
 
         <div
-          className={`border-2 border-dashed rounded-xl h-[400px] flex flex-col items-center justify-center transition-all relative overflow-hidden group
-            ${dragActive ? 'border-brand-500 bg-brand-500/5' : 'border-gray-300 dark:border-white/10 bg-white dark:bg-surface-200 hover:bg-surface-200/80 hover:border-gray-400 dark:hover:border-white/20'}`}
+          className={`surface-card-strong border-2 border-dashed h-[400px] flex flex-col items-center justify-center transition-all relative overflow-hidden group
+            ${dragActive ? 'border-brand-500 bg-brand-500/5' : 'border-gray-300 dark:border-white/10 hover:border-gray-400 dark:hover:border-white/20'}`}
           onDragEnter={handleDrag} onDragLeave={handleDrag} onDragOver={handleDrag} onDrop={handleDrop}
         >
           <div className="absolute inset-0 bg-gradient-to-br from-brand-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
 
-          <div className="w-20 h-20 rounded-full bg-gray-50 dark:bg-surface-300 border border-gray-200 dark:border-white/5 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
-            <MonitorPlay size={40} className={dragActive ? 'text-brand-400' : 'text-gray-400 dark:text-gray-400'} />
+          <div className="surface-inset mb-6 flex h-20 w-20 items-center justify-center rounded-full group-hover:scale-110 transition-transform duration-300">
+            <MonitorPlay size={40} className={dragActive ? 'text-brand-400' : 'app-muted'} />
           </div>
-          <h3 className="text-xl font-bold text-gray-800 dark:text-gray-200">Drop a Datalog CSV</h3>
-          <p className="text-gray-400 dark:text-gray-500 mt-2 text-center max-w-sm text-sm">
+          <h3 className="text-xl font-bold app-heading">Drop a Datalog CSV</h3>
+          <p className="mt-2 max-w-sm text-center text-sm app-muted">
             All numeric channels are detected automatically. Toggle any combination to visualize them side-by-side.
           </p>
 
           <div className="mt-8 flex items-center gap-4 w-full max-w-xs px-8">
-            <div className="h-px bg-gray-200 dark:bg-white/10 flex-1" />
-            <span className="text-gray-400 dark:text-gray-500 text-xs font-semibold uppercase tracking-wider">or</span>
-            <div className="h-px bg-gray-200 dark:bg-white/10 flex-1" />
+            <div className="app-divider h-px flex-1 border-t" />
+            <span className="text-xs font-semibold uppercase tracking-wider app-muted">or</span>
+            <div className="app-divider h-px flex-1 border-t" />
           </div>
 
-          <label className="mt-8 cursor-pointer bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 border border-gray-300 dark:border-white/10 hover:border-gray-400 dark:hover:border-white/20 text-gray-800 dark:text-gray-200 px-6 py-2.5 rounded-lg text-sm font-semibold transition-all relative z-10 shadow-sm dark:shadow-none">
+          <label className="app-button-secondary relative z-10 mt-8 cursor-pointer px-6 py-2.5 text-sm font-semibold">
             Browse Files
             <input type="file" className="hidden" accept=".csv,text/csv,text/plain" onChange={handleFileChange} />
           </label>
@@ -290,16 +268,16 @@ const LogViewer = () => {
   const { numericChannels, stats, colors, filename, timeCol, rows } = fileData;
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-surface-200 overflow-hidden animate-fade-in">
+    <div className="surface-card-strong flex flex-col h-full overflow-hidden animate-fade-in">
       {/* Top bar */}
-      <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 dark:border-white/5 bg-gray-50/80 dark:bg-surface-300/50 shrink-0 backdrop-blur-sm">
+      <div className="flex items-center justify-between px-5 py-3 border-b app-divider bg-[var(--app-card-inset)]/80 shrink-0 backdrop-blur-sm">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-brand-500/10 border border-brand-500/20 flex items-center justify-center text-brand-400">
             <MonitorPlay size={16} />
           </div>
           <div>
-            <h1 className="text-gray-900 dark:text-gray-100 font-semibold text-sm leading-tight">Interactive Log Viewer</h1>
-            <p className="text-gray-400 dark:text-gray-500 text-[11px] flex items-center gap-1.5 font-medium mt-0.5">
+            <h1 className="text-sm font-semibold leading-tight app-heading">Interactive Log Viewer</h1>
+            <p className="mt-0.5 flex items-center gap-1.5 text-[11px] font-medium app-muted">
               <FileText size={10} />
               {filename} <span className="text-white/10 px-1">•</span> {rows.length} samples <span className="text-white/10 px-1">•</span> {numericChannels.length} channels
             </p>
@@ -307,7 +285,7 @@ const LogViewer = () => {
         </div>
         <button
           onClick={() => setFileData(null)}
-          className="flex items-center gap-2 text-xs font-medium text-gray-400 dark:text-gray-400 hover:text-gray-100 bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/5 hover:bg-gray-200 dark:hover:bg-white/10 hover:border-gray-300 dark:hover:border-white/10 px-3 py-1.5 rounded-md transition-all"
+          className="app-button-secondary flex items-center gap-2 px-3 py-1.5 text-xs font-medium"
         >
           <RotateCcw size={12} />
           Close Log
@@ -317,33 +295,33 @@ const LogViewer = () => {
       {/* Body: channel list + chart */}
       <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
         {/* ── Left: channel panel ── */}
-        <div className="w-full md:w-64 h-1/3 md:h-auto shrink-0 flex flex-col bg-gray-50/50 dark:bg-surface-300/30 border-b md:border-b-0 md:border-r border-gray-200 dark:border-white/5 overflow-hidden">
+        <div className="app-soft-panel h-1/3 w-full shrink-0 overflow-hidden rounded-none border-b md:h-auto md:w-64 md:border-b-0 md:border-r">
           {/* Search */}
-          <div className="p-3 border-b border-gray-200 dark:border-white/5">
+          <div className="app-divider border-b p-3">
             <div className="relative">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+              <Search size={14} className="app-muted absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 placeholder="Search channels…"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                className="w-full bg-gray-50 dark:bg-surface-300 border border-gray-300 dark:border-white/10 focus:border-brand-500 rounded-md pl-8 pr-3 py-2 text-gray-800 dark:text-gray-200 text-xs font-medium outline-none transition-colors placeholder-gray-600 shadow-inner"
+                className="app-input w-full pl-8 pr-3 py-2 text-xs font-medium"
               />
             </div>
           </div>
 
           {/* Select all / none & Presets */}
-          <div className="flex flex-col gap-2 px-3 py-2 border-b border-gray-200 dark:border-white/5 bg-gray-50/80 dark:bg-surface-300/50">
+          <div className="app-divider flex flex-col gap-2 border-b px-3 py-2">
             <div className="flex gap-2">
               <button
                 onClick={() => setSelected(new Set(numericChannels))}
-                className="flex-1 text-[11px] font-semibold py-1.5 rounded border border-gray-300 dark:border-white/10 text-gray-400 dark:text-gray-400 hover:border-brand-500/50 hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-all"
+                className="app-button-secondary flex-1 py-1.5 text-[11px] font-semibold"
               >Select All</button>
               <button
                 onClick={() => setSelected(new Set())}
-                className="flex-1 text-[11px] font-semibold py-1.5 rounded border border-gray-300 dark:border-white/10 text-gray-400 dark:text-gray-400 hover:border-red-500/50 hover:text-red-400 hover:bg-gray-100 dark:hover:bg-white/5 transition-all"
+                className="app-button-danger flex-1 py-1.5 text-[11px] font-semibold"
               >Clear</button>
-              <span className="text-[10px] font-bold text-gray-600 self-center shrink-0 w-10 text-right">{selected.size}/{numericChannels.length}</span>
+              <span className="app-muted self-center shrink-0 w-10 text-right text-[10px] font-bold">{selected.size}/{numericChannels.length}</span>
             </div>
 
             {/* Presets */}
@@ -363,7 +341,7 @@ const LogViewer = () => {
                   );
                   setSelected(tunerSel);
                 }}
-                className="flex-1 text-[11px] font-semibold py-1.5 rounded border border-brand-500/30 text-brand-500 bg-brand-500/5 hover:bg-brand-500/10 hover:border-brand-500/60 transition-all flex items-center justify-center gap-1.5"
+                className="app-button-secondary flex flex-1 items-center justify-center gap-1.5 border-brand-500/30 bg-brand-500/5 py-1.5 text-[11px] font-semibold text-brand-500"
               >
                 <BarChart2 size={12} />
                 Tuner Preset
@@ -376,7 +354,7 @@ const LogViewer = () => {
                   );
                   setSelected(fuelSel);
                 }}
-                className="flex-1 text-[11px] font-semibold py-1.5 rounded border border-blue-500/30 text-blue-500 bg-blue-500/5 hover:bg-blue-500/10 hover:border-blue-500/60 transition-all flex items-center justify-center gap-1.5"
+                className="app-button-secondary flex flex-1 items-center justify-center gap-1.5 border-blue-500/30 bg-blue-500/5 py-1.5 text-[11px] font-semibold text-blue-500"
               >
                 <Droplet size={12} />
                 Fueling
@@ -395,8 +373,8 @@ const LogViewer = () => {
                   onClick={() => toggleChannel(ch)}
                   className={`w-full text-left px-2.5 py-2 rounded-md border transition-all group
                     ${active
-                      ? 'bg-gray-50 dark:bg-surface-300 border-gray-300 dark:border-white/10 shadow-sm dark:shadow-none'
-                      : 'border-transparent hover:bg-gray-100 dark:hover:bg-white/5'
+                      ? 'app-soft-panel shadow-sm'
+                      : 'border-transparent hover:bg-[var(--app-card-inset)]/70'
                     }`}
                 >
                   <div className="flex items-center gap-2">
@@ -404,16 +382,16 @@ const LogViewer = () => {
                       className={`w-2 h-2 rounded-full shrink-0 transition-all ${active ? 'shadow-[0_0_6px_currentColor]' : 'opacity-40 group-hover:opacity-60'}`}
                       style={{ backgroundColor: colors[ch], color: colors[ch] }}
                     />
-                    <span className={`text-[11px] truncate flex-1 font-semibold leading-tight ${active ? 'text-gray-800 dark:text-gray-200' : 'text-gray-400 dark:text-gray-500 group-hover:text-gray-300'}`}>{ch}</span>
+                    <span className={`text-[11px] truncate flex-1 font-semibold leading-tight ${active ? 'app-heading' : 'app-muted group-hover:text-[var(--app-heading)]'}`}>{ch}</span>
                     {active
-                      ? <Eye size={12} className="text-gray-400 dark:text-gray-400 shrink-0" />
-                      : <EyeOff size={12} className="text-gray-600 shrink-0 opacity-0 group-hover:opacity-100" />
+                      ? <Eye size={12} className="app-muted shrink-0" />
+                      : <EyeOff size={12} className="shrink-0 opacity-0 app-muted group-hover:opacity-100" />
                     }
                   </div>
                   {s && active && (
                     <div className="mt-1.5 pl-4 flex gap-3">
-                      <span className="text-[10px] text-gray-400 dark:text-gray-500 font-medium">min: <span className="text-gray-700 dark:text-gray-300">{fmt(s.min)}</span></span>
-                      <span className="text-[10px] text-gray-400 dark:text-gray-500 font-medium">max: <span className="text-gray-700 dark:text-gray-300">{fmt(s.max)}</span></span>
+                      <span className="app-muted text-[10px] font-medium">min: <span className="app-heading">{fmt(s.min)}</span></span>
+                      <span className="app-muted text-[10px] font-medium">max: <span className="app-heading">{fmt(s.max)}</span></span>
                     </div>
                   )}
                 </button>
@@ -427,7 +405,7 @@ const LogViewer = () => {
           <div className="absolute inset-0 bg-surface-300/10 pointer-events-none" />
 
           {selected.size === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 relative z-10">
+            <div className="app-muted relative z-10 flex flex-1 flex-col items-center justify-center">
               <BarChart2 size={48} className="opacity-20 mb-4" />
               <p className="text-sm font-medium">Select channels from the left panel to plot them here.</p>
             </div>
@@ -435,12 +413,12 @@ const LogViewer = () => {
             <div className="flex-1 flex flex-col min-h-0 relative z-10">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartData} margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#27272A" vertical={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--app-chart-grid)" vertical={false} />
 
                   <XAxis
                     dataKey="_t"
-                    stroke="#52525B"
-                    tick={{ fontSize: 10, fill: '#71717A' }}
+                    stroke="var(--app-chart-axis)"
+                    tick={{ fontSize: 10, fill: 'var(--app-chart-axis-muted)' }}
                     tickLine={false}
                     axisLine={false}
                     tickFormatter={v => typeof v === 'number' ? v.toFixed(1) : v}
@@ -448,7 +426,7 @@ const LogViewer = () => {
                       value: timeCol || 'Sample Index',
                       position: 'insideBottomRight',
                       offset: -10,
-                      fill: '#52525B',
+                      fill: 'var(--app-chart-axis)',
                       fontSize: 10,
                       fontWeight: 600,
                       textAnchor: 'end'
@@ -456,8 +434,8 @@ const LogViewer = () => {
                   />
 
                   <YAxis
-                    stroke="#52525B"
-                    tick={{ fontSize: 10, fill: '#71717A' }}
+                    stroke="var(--app-chart-axis)"
+                    tick={{ fontSize: 10, fill: 'var(--app-chart-axis-muted)' }}
                     domain={[0, 100]}
                     tickLine={false}
                     axisLine={false}
@@ -467,15 +445,15 @@ const LogViewer = () => {
 
                   <Tooltip
                     content={<CustomTooltip />}
-                    cursor={{ stroke: '#52525B', strokeWidth: 1, strokeDasharray: '4 4' }}
+                    cursor={{ stroke: 'var(--app-chart-axis)', strokeWidth: 1, strokeDasharray: '4 4' }}
                     isAnimationActive={false}
                   />
 
                   <Brush
                     dataKey="_t"
                     height={20}
-                    stroke="#3F3F46"
-                    fill="#18181B"
+                    stroke="var(--app-chart-brush-stroke)"
+                    fill="var(--app-chart-brush-fill)"
                     travellerWidth={6}
                     tickFormatter={v => typeof v === 'number' ? v.toFixed(1) : ''}
                     className="opacity-70 hover:opacity-100 transition-opacity"
@@ -502,17 +480,17 @@ const LogViewer = () => {
 
           {/* Bottom legend / Active Channels */}
           {selected.size > 0 && (
-            <div className="shrink-0 pt-3 mt-2 border-t border-gray-200 dark:border-white/5 flex flex-wrap gap-x-2 gap-y-2 max-h-20 overflow-y-auto custom-scrollbar relative z-10">
+            <div className="app-divider relative z-10 mt-2 flex max-h-20 shrink-0 flex-wrap gap-x-2 gap-y-2 overflow-y-auto border-t pt-3 custom-scrollbar">
               {[...selected].map(ch => (
                 <button
                   key={ch}
                   onClick={() => toggleChannel(ch)}
                   title={`Remove ${ch}`}
-                  className="flex items-center gap-1.5 text-[11px] font-medium text-gray-700 dark:text-gray-300 hover:text-white bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 border border-gray-200 dark:border-white/5 hover:border-gray-300 dark:hover:border-white/10 px-2 py-1 rounded transition-colors group"
+                  className="app-button-secondary group flex items-center gap-1.5 px-2 py-1 text-[11px] font-medium"
                 >
                   <span className="inline-block w-2 h-2 rounded-full shrink-0 shadow-sm dark:shadow-none" style={{ backgroundColor: colors[ch] }} />
                   <span className="truncate max-w-[150px]">{ch}</span>
-                  <XCircle size={10} className="text-gray-400 dark:text-gray-500 opacity-0 group-hover:opacity-100 ml-1 transition-opacity" />
+                  <XCircle size={10} className="app-muted ml-1 opacity-0 transition-opacity group-hover:opacity-100" />
                 </button>
               ))}
             </div>

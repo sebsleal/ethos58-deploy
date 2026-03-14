@@ -130,6 +130,16 @@ const IAT_CAUTION_F = 120;
 const TIMING_RISK_DEG = -4.0;
 const TIMING_CAUTION_DEG = -2.0;
 
+function maxFinite(values) {
+  let peak = null;
+  for (let i = 0; i < values.length; i += 1) {
+    const value = values[i];
+    if (!Number.isFinite(value)) continue;
+    if (peak === null || value > peak) peak = value;
+  }
+  return peak;
+}
+
 // O2 sensors read 18–22+ during decel fuel cut regardless of blend.
 // Chart AFR values above this threshold are excluded to clean up the display.
 const FUEL_CUT_AFR = 16.5;
@@ -329,7 +339,7 @@ function analyzeHpfp(rows, columns, boostUnit) {
   }
 
   const avgActual = actuals.reduce((a, b) => a + b, 0) / actuals.length;
-  const peakActual = Math.max(...actuals);
+  const peakActual = maxFinite(actuals);
 
   let avgTarget = null;
   if (targetCol) {
@@ -478,7 +488,7 @@ function analyzeIat(rows, columns, boostUnit) {
     return { value: null, unit, peak_f: null, status: 'Safe', note: 'No valid IAT readings during engine demand.' };
   }
 
-  const maxRaw = Math.max(...sourceValues);
+  const maxRaw = maxFinite(sourceValues);
   const peakF  = roundN(toF(maxRaw), 1);
   const context = demandRows.length >= 5 ? 'under load' : 'session peak';
 
@@ -569,7 +579,18 @@ function analyzeTimingCorrections(rows, timingColumns, columns, boostUnit) {
 // ─── Chart Data ──────────────────────────────────────────────────────────────
 
 function buildChartData(rows, columns, isLambdaAfr, boostUnit, maxPoints = 150, thresholds, timingColumns = []) {
-  const { time: timeCol, afr: afrCol, afr_target: targetCol, boost: boostCol, load: loadCol, pedal: pedalCol, throttle: throttleCol, hpfp: hpfpCol, hpfp_target: hpfpTargetCol } = columns;
+  const {
+    time: timeCol,
+    rpm: rpmCol,
+    afr: afrCol,
+    afr_target: targetCol,
+    boost: boostCol,
+    load: loadCol,
+    pedal: pedalCol,
+    throttle: throttleCol,
+    hpfp: hpfpCol,
+    hpfp_target: hpfpTargetCol,
+  } = columns;
   const toAfr = v => isLambdaAfr ? lambdaToAfr(v) : v;
   const { lean_caution } = thresholds;
 
@@ -577,7 +598,7 @@ function buildChartData(rows, columns, isLambdaAfr, boostUnit, maxPoints = 150, 
   let hpfpPeak = null;
   if (hpfpCol && !hpfpTargetCol) {
     const actuals = rows.map(r => num(r, hpfpCol)).filter(v => !isNaN(v) && v > 0);
-    if (actuals.length) hpfpPeak = Math.max(...actuals);
+    if (actuals.length) hpfpPeak = maxFinite(actuals);
   }
 
   // Find the single worst HPFP drop row — only that one point gets flagged on the chart
@@ -613,6 +634,7 @@ function buildChartData(rows, columns, isLambdaAfr, boostUnit, maxPoints = 150, 
     const rawTarget = num(row, targetCol);
     const rawBoost = num(row, boostCol);
     const rawTime = num(row, timeCol);
+    const rawRpm = num(row, rpmCol);
 
     const boostPsi = normalizeBoostToPsi(rawBoost, boostUnit);
 
@@ -658,6 +680,7 @@ function buildChartData(rows, columns, isLambdaAfr, boostUnit, maxPoints = 150, 
 
     chartData.push({
       time: !isNaN(rawTime) ? roundN(rawTime, 2) : String(i),
+      rpm: !isNaN(rawRpm) ? Math.round(rawRpm) : undefined,
       afrActual: afrDisplay,
       afrTarget: !isNaN(rawTarget) ? roundN(toAfr(rawTarget), 2) : undefined,
       boost: !isNaN(boostPsi) ? roundN(boostPsi, 1) : undefined,

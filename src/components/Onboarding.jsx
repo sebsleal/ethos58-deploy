@@ -1,6 +1,7 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Droplet, FileText, Activity, BarChart2, ArrowRight, CheckCircle } from 'lucide-react';
 import { markOnboardingDone } from '../utils/storage';
+import { useSwipeDismiss } from '../hooks/useSwipeDismiss';
 
 const SLIDES = [
   {
@@ -35,8 +36,7 @@ const SLIDES = [
 
 export default function Onboarding({ onDone }) {
   const [slide, setSlide] = useState(0);
-  const touchStartYRef = useRef(null);
-  const [dragDelta, setDragDelta] = useState(0);
+  const dialogRef = useRef(null);
 
   const isLast = slide === SLIDES.length - 1;
   const { icon: Icon, color, bg, title, body } = SLIDES[slide];
@@ -46,45 +46,59 @@ export default function Onboarding({ onDone }) {
     onDone();
   }
 
-  const handleSwipeStart = (e) => {
-    touchStartYRef.current = e.touches[0].clientY;
-    setDragDelta(0);
-  };
+  const { dragDelta, swipeBind } = useSwipeDismiss(finish);
 
-  const handleSwipeMove = (e) => {
-    if (touchStartYRef.current === null) return;
-    const delta = e.touches[0].clientY - touchStartYRef.current;
-    setDragDelta(Math.max(0, delta));
-  };
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return undefined;
 
-  const handleSwipeEnd = () => {
-    if (dragDelta > 60) finish();
-    touchStartYRef.current = null;
-    setDragDelta(0);
-  };
+    const focusable = dialog.querySelector('button');
+    focusable?.focus();
+
+    const handleKeyDown = (event) => {
+      if (event.key !== 'Tab') return;
+      const nodes = dialog.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      const focusableNodes = Array.from(nodes).filter((node) => !node.hasAttribute('disabled'));
+      if (!focusableNodes.length) return;
+      const first = focusableNodes[0];
+      const last = focusableNodes[focusableNodes.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    dialog.addEventListener('keydown', handleKeyDown);
+    return () => dialog.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4 py-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 backdrop-blur-sm px-4 py-4"
       style={{
         paddingTop: 'max(1rem, env(safe-area-inset-top))',
         paddingBottom: 'max(1rem, env(safe-area-inset-bottom))',
       }}
     >
       <div
-        className="relative bg-white dark:bg-[#0f0f11] border border-gray-200 dark:border-zinc-800 rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
+        ref={dialogRef}
+        className="surface-panel animate-modal-in relative w-full max-w-md overflow-hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Ethos58 onboarding"
         style={{
           transform: dragDelta > 0 ? `translateY(${Math.min(dragDelta, 120)}px)` : 'translateY(0)',
           transition: dragDelta > 0 ? 'none' : 'transform 0.25s ease',
         }}
       >
         <div
-          className="pt-2 pb-1 flex justify-center cursor-grab active:cursor-grabbing"
-          onTouchStart={handleSwipeStart}
-          onTouchMove={handleSwipeMove}
-          onTouchEnd={handleSwipeEnd}
+          className="pt-3 pb-1 flex justify-center cursor-grab active:cursor-grabbing"
+          {...swipeBind}
         >
-          <span className="h-1 w-12 rounded-full bg-gray-300 dark:bg-zinc-700" />
+          <span className="h-1 w-12 rounded-full bg-slate-300/90 dark:bg-white/12" />
         </div>
 
         {/* Progress dots */}
@@ -93,18 +107,20 @@ export default function Onboarding({ onDone }) {
             <button
               key={i}
               onClick={() => setSlide(i)}
-              className={`h-1.5 rounded-full transition-all ${i === slide ? 'w-6 bg-brand-500' : 'w-1.5 bg-gray-300 dark:bg-zinc-700'}`}
+              className={`h-[3px] rounded-[2px] transition-all ${i === slide ? 'w-5 bg-brand-400' : 'w-[5px] bg-white/12'}`}
+              aria-label={`Go to onboarding slide ${i + 1}`}
+              aria-pressed={i === slide}
             />
           ))}
         </div>
 
         {/* Slide content */}
-        <div className="px-8 py-6 text-center">
-          <div className={`inline-flex items-center justify-center w-16 h-16 rounded-2xl ${bg} mb-5`}>
+        <div className="px-8 py-8 text-center">
+          <div className={`inline-flex items-center justify-center w-14 h-14 rounded-lg border border-[var(--app-border)] ${bg} mb-5`}>
             <Icon size={28} className={color} strokeWidth={1.5} />
           </div>
-          <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-3">{title}</h2>
-          <p className="text-sm text-gray-600 dark:text-zinc-400 leading-relaxed">{body}</p>
+          <h2 className="text-xl font-semibold app-heading mb-3">{title}</h2>
+          <p className="text-sm leading-relaxed app-muted">{body}</p>
         </div>
 
         {/* Navigation */}
@@ -112,14 +128,14 @@ export default function Onboarding({ onDone }) {
           {!isLast && (
             <button
               onClick={finish}
-              className="flex-1 py-2.5 text-sm text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors"
+              className="flex-1 rounded py-2.5 text-sm app-muted transition-colors hover:text-[var(--app-heading)]"
             >
               Skip
             </button>
           )}
           <button
             onClick={isLast ? finish : () => setSlide(s => s + 1)}
-            className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-colors ${isLast ? 'flex-1 bg-brand-500 hover:bg-brand-600 text-white' : 'flex-1 bg-brand-500/10 hover:bg-brand-500/20 text-brand-600 dark:text-brand-400'}`}
+            className={`flex items-center justify-center gap-2 rounded py-2.5 text-sm font-semibold transition-colors ${isLast ? 'flex-1 bg-brand-500 hover:bg-brand-600 text-white' : 'flex-1 border border-brand-500/18 bg-brand-500/8 text-brand-600 hover:bg-brand-500/14 dark:text-brand-300'}`}
           >
             {isLast ? (
               <><CheckCircle size={16} /> Get Started</>

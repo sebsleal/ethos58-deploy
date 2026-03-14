@@ -1,573 +1,609 @@
-import { useRef, useState, useEffect, useMemo } from 'react';
-import { ArrowRight, Activity, Droplet, FileText, Settings2, Zap, MonitorPlay, CheckCircle, AlertTriangle, Trash2, Heart, TrendingUp, Upload } from 'lucide-react';
+import { useMemo, useRef, useState, useEffect, useCallback } from 'react';
+import {
+  Activity,
+  ArrowRight,
+  CalendarClock,
+  Droplet,
+  FileText,
+  Flame,
+  Heart,
+  ShieldCheck,
+  Trash2,
+  TrendingUp,
+  Upload,
+  Zap,
+} from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
-import { getRecentLogs, clearRecentLogs, getActiveBlend, clearActiveBlend, getLogResult } from '../utils/storage';
+import { Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { clearActiveBlend, clearRecentLogs, getActiveBlend, getLogResult, getRecentLogs } from '../utils/storage';
 import { hapticLight } from '../utils/haptics';
-
-const STATUS_ICON = {
-  Safe:    <CheckCircle size={14} className="text-green-400" />,
-  Caution: <AlertTriangle size={14} className="text-yellow-400" />,
-  Risk:    <AlertTriangle size={14} className="text-red-400" />,
-};
-
-const STATUS_COLOR = {
-  Safe:    'text-green-400 bg-green-500/10 border-green-500/20',
-  Caution: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20',
-  Risk:    'text-red-400 bg-red-500/10 border-red-500/20',
-};
+import { usePullToRefresh } from '../hooks/usePullToRefresh';
+import { ActionTile, ChartCard, InsetCard, MetricPill, PageHeader, SectionTitle, StatusPill, SurfaceCard } from '../components/ui';
 
 function formatDate(iso) {
-  const d = new Date(iso);
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const date = new Date(iso);
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
 function formatShortDate(iso) {
-  const d = new Date(iso);
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const date = new Date(iso);
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function formatTimeAgo(iso) {
+  const deltaMs = new Date(iso).getTime() - Date.now();
+  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+  const minutes = Math.round(deltaMs / 60000);
+  if (Math.abs(minutes) < 60) return rtf.format(minutes, 'minute');
+  const hours = Math.round(minutes / 60);
+  if (Math.abs(hours) < 24) return rtf.format(hours, 'hour');
+  const days = Math.round(hours / 24);
+  return rtf.format(days, 'day');
 }
 
 function scoreColor(score) {
-  if (score === null || score === undefined) return '#71717a';
-  if (score >= 80) return '#22c55e';
-  if (score >= 55) return '#eab308';
+  if (score === null || score === undefined) return '#94a3b8';
+  if (score >= 80) return '#14b8a6';
+  if (score >= 55) return '#f59e0b';
   return '#ef4444';
 }
 
 function scoreLabel(score) {
-  if (score === null || score === undefined) return '—';
-  if (score >= 80) return 'Good';
-  if (score >= 55) return 'Caution';
+  if (score === null || score === undefined) return 'No Data';
+  if (score >= 80) return 'Healthy';
+  if (score >= 55) return 'Watch';
   return 'Risk';
 }
 
-function formatMonthLabel(monthKey) {
-  const [year, month] = monthKey.split('-').map(Number);
-  if (!year || !month) return monthKey;
-  return new Date(year, month - 1, 1).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+function average(values) {
+  if (!values.length) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
-function average(nums) {
-  if (!nums.length) return null;
-  return nums.reduce((sum, value) => sum + value, 0) / nums.length;
+function maxFinite(values) {
+  let best = null;
+  for (let i = 0; i < values.length; i += 1) {
+    const value = values[i];
+    if (!Number.isFinite(value)) continue;
+    if (best === null || value > best) best = value;
+  }
+  return best;
 }
 
-function toNumericValue(value) {
-  if (value === null || value === undefined || value === '—' || value === '') return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
+function minFinite(values) {
+  let best = null;
+  for (let i = 0; i < values.length; i += 1) {
+    const value = values[i];
+    if (!Number.isFinite(value)) continue;
+    if (best === null || value < best) best = value;
+  }
+  return best;
 }
 
-// SVG ring progress component
-function HealthRing({ score, size = 80 }) {
-  const r = (size - 10) / 2;
-  const circ = 2 * Math.PI * r;
+function buildBoostSeries(analysis) {
+  const chartData = Array.isArray(analysis?.chartData) ? analysis.chartData : [];
+  const rows = chartData
+    .map((point, index) => {
+      const boost = Number(point?.boost);
+      if (!Number.isFinite(boost)) return null;
+      const rpm = Number(point?.rpm);
+      const time = Number(point?.time);
+      return {
+        key: index,
+        axisValue: Number.isFinite(rpm) ? rpm : Number.isFinite(time) ? time : index + 1,
+        boost,
+      };
+    })
+    .filter(Boolean);
+
+  return {
+    data: rows,
+    label: rows.some((point) => point.axisValue > 1000) ? 'RPM' : 'Time',
+  };
+}
+
+function buildTimingSeries(analysis) {
+  const scatter = Array.isArray(analysis?.knockScatter) ? analysis.knockScatter : [];
+  if (!scatter.length) return [];
+
+  const groups = new Map();
+  scatter.forEach((point) => {
+    const rpm = Number(point?.rpm);
+    const pull = Number(point?.pull);
+    if (!Number.isFinite(rpm) || !Number.isFinite(pull)) return;
+    const bucket = Math.round(rpm / 250) * 250;
+    const current = groups.get(bucket);
+    if (!current || pull < current.pull) {
+      groups.set(bucket, { rpm: bucket, pull });
+    }
+  });
+
+  return [...groups.values()].sort((a, b) => a.rpm - b.rpm);
+}
+
+function HealthRing({ score, size = 132 }) {
+  const radius = (size - 12) / 2;
+  const circumference = 2 * Math.PI * radius;
   const pct = score === null ? 0 : Math.max(0, Math.min(100, score));
-  const dash = (pct / 100) * circ;
-  const color = scoreColor(score);
+  const dash = (pct / 100) * circumference;
 
   return (
     <svg width={size} height={size} className="rotate-[-90deg]">
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="currentColor" strokeWidth={8}
-        className="text-gray-200 dark:text-zinc-800" />
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={8}
-        strokeDasharray={`${dash} ${circ}`} strokeLinecap="round"
-        style={{ transition: 'stroke-dasharray 0.6s ease' }} />
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={radius}
+        fill="none"
+        stroke="rgba(148,163,184,0.18)"
+        strokeWidth={9}
+      />
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={radius}
+        fill="none"
+        stroke={scoreColor(score)}
+        strokeWidth={9}
+        strokeDasharray={`${dash} ${circumference}`}
+        strokeLinecap="round"
+        style={{ transition: 'stroke-dasharray 0.55s ease' }}
+      />
     </svg>
   );
 }
 
-function HealthScorePanel({ log }) {
-  const score = log?.healthScore ?? null;
-  const color = scoreColor(score);
+function TrendTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null;
 
   return (
-    <div className="flex items-center gap-4">
-      <div className="relative shrink-0">
-        <HealthRing score={score} size={80} />
-        <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-lg font-bold" style={{ color }}>{score ?? '—'}</span>
-        </div>
-      </div>
-      <div>
-        <p className="text-sm font-semibold text-gray-900 dark:text-white">{scoreLabel(score)}</p>
-        {log ? (
-          <>
-            <p className="text-xs text-gray-500 dark:text-zinc-400 truncate max-w-[140px]">{log.filename}</p>
-            <p className="text-xs text-gray-400 dark:text-zinc-500 mt-0.5">{formatDate(log.date)}</p>
-          </>
-        ) : (
-          <p className="text-xs text-gray-500 dark:text-zinc-400 mt-0.5">No logs analyzed yet</p>
-        )}
-      </div>
+    <div className="app-chart-tooltip min-w-[180px] p-3 text-xs shadow-lg">
+      <p className="mb-1 app-muted">{label}</p>
+      {payload.map((entry) => (
+        <p key={entry.dataKey} className="mt-1 font-medium app-heading">
+          <span className="app-muted">{entry.name}:</span> {entry.value ?? '—'}
+        </p>
+      ))}
     </div>
   );
 }
 
-const CustomTooltip = ({ active, payload, label }) => {
-  if (!active || !payload?.length) return null;
-  const d = payload[0]?.payload;
-  return (
-    <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-xs shadow-lg">
-      <p className="text-gray-500 dark:text-zinc-400 mb-1">{label}</p>
-      <p className="font-semibold" style={{ color: scoreColor(d.healthScore) }}>
-        Score {d.healthScore ?? '—'} — {scoreLabel(d.healthScore)}
-      </p>
-      {d.sampleSize > 1 && (
-        <p className="text-gray-400 dark:text-zinc-500">{d.sampleSize} logs in group</p>
-      )}
-      {d.timingPull !== null && d.timingPull !== undefined && (
-        <p className="text-gray-400 dark:text-zinc-500">Timing pull avg {d.timingPull}°</p>
-      )}
-    </div>
-  );
-};
-
-const Dashboard = () => {
+export default function Dashboard() {
   const [recentLogs, setRecentLogs] = useState([]);
   const [activeBlend, setActiveBlend] = useState(null);
-  const [pullDistance, setPullDistance] = useState(0);
-  const [refreshing, setRefreshing] = useState(false);
-  const [trendFilter, setTrendFilter] = useState('date');
-  const startTouchYRef = useRef(null);
-  const pullDistanceRef = useRef(0); // mirrors pullDistance for use in non-reactive closures
-  const refreshingRef = useRef(false);
-  const refreshTimeoutRef = useRef(null);
   const rootRef = useRef(null);
   const navigate = useNavigate();
 
-  const loadDashboardData = () => {
+  const loadDashboardData = useCallback(() => {
     setRecentLogs(getRecentLogs());
     setActiveBlend(getActiveBlend());
-  };
+  }, []);
 
   useEffect(() => {
     loadDashboardData();
-  }, []);
+  }, [loadDashboardData]);
 
-  const getScrollContainer = () => {
-    return rootRef.current?.closest('[data-scroll-container]') ?? null;
-  };
-
-  const finishRefresh = () => {
-    if (refreshTimeoutRef.current !== null) {
-      window.clearTimeout(refreshTimeoutRef.current);
-    }
-    refreshTimeoutRef.current = window.setTimeout(() => {
-      refreshingRef.current = false;
-      setPullDistance(0);
-      setRefreshing(false);
-      refreshTimeoutRef.current = null;
-    }, 350);
-  };
-
-  const triggerRefresh = () => {
-    if (refreshingRef.current) return;
-    refreshingRef.current = true;
-    setRefreshing(true);
-    void hapticLight();
+  const handleRefresh = useCallback(async () => {
+    await hapticLight();
     loadDashboardData();
-    finishRefresh();
-  };
+  }, [loadDashboardData]);
 
-  useEffect(() => {
-    return () => {
-      if (refreshTimeoutRef.current !== null) {
-        window.clearTimeout(refreshTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  // Non-passive touch listeners so preventDefault() works on iOS WebView
-  // (React's onTouchMove is passive by default, which silently ignores preventDefault)
-  useEffect(() => {
-    const el = rootRef.current;
-    if (!el) return;
-
-    const onStart = (e) => {
-      if (refreshingRef.current) {
-        startTouchYRef.current = null;
-        return;
-      }
-      const scrollEl = getScrollContainer();
-      if (!scrollEl || scrollEl.scrollTop > 0) { startTouchYRef.current = null; return; }
-      startTouchYRef.current = e.touches[0].clientY;
-    };
-
-    const onMove = (e) => {
-      if (refreshingRef.current) return;
-      if (startTouchYRef.current === null) return;
-      const scrollEl = getScrollContainer();
-      if (!scrollEl || scrollEl.scrollTop > 0) return;
-      const delta = e.touches[0].clientY - startTouchYRef.current;
-      if (delta <= 0) { pullDistanceRef.current = 0; setPullDistance(0); return; }
-      e.preventDefault(); // stops native overscroll competing on iOS
-      const clamped = Math.min(delta, 120);
-      pullDistanceRef.current = clamped;
-      setPullDistance(clamped);
-    };
-
-    const onEnd = () => {
-      if (refreshingRef.current) {
-        startTouchYRef.current = null;
-        pullDistanceRef.current = 0;
-        setPullDistance(0);
-        return;
-      }
-      if (startTouchYRef.current === null) return;
-      startTouchYRef.current = null;
-      const dist = pullDistanceRef.current;
-      pullDistanceRef.current = 0;
-      setPullDistance(0);
-      if (dist >= 70) triggerRefresh();
-    };
-
-    const onCancel = () => {
-      startTouchYRef.current = null;
-      pullDistanceRef.current = 0;
-      setPullDistance(0);
-    };
-
-    el.addEventListener('touchstart', onStart, { passive: true });
-    el.addEventListener('touchmove', onMove, { passive: false });
-    el.addEventListener('touchend', onEnd, { passive: true });
-    el.addEventListener('touchcancel', onCancel, { passive: true });
-    return () => {
-      el.removeEventListener('touchstart', onStart);
-      el.removeEventListener('touchmove', onMove);
-      el.removeEventListener('touchend', onEnd);
-      el.removeEventListener('touchcancel', onCancel);
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleClearLogs = () => {
-    clearRecentLogs();
-    setRecentLogs([]);
-  };
-
-  const handleClearBlend = () => {
-    clearActiveBlend();
-    setActiveBlend(null);
-  };
+  const { pullDistance, refreshing } = usePullToRefresh(rootRef, {
+    getScrollContainer: () => rootRef.current?.closest('[data-scroll-container]') ?? null,
+    onRefresh: handleRefresh,
+  });
 
   const mostRecentLog = recentLogs[0] || null;
+  const scoredLogs = useMemo(
+    () => recentLogs.filter((log) => log.healthScore !== null && log.healthScore !== undefined),
+    [recentLogs],
+  );
 
-  const filteredTrendLogs = useMemo(() => {
-    return recentLogs.filter(log => log.healthScore !== null && log.healthScore !== undefined);
-  }, [recentLogs]);
+  const averageHealthScore = useMemo(() => {
+    const value = average(scoredLogs.map((log) => log.healthScore));
+    return value === null ? null : Number(value.toFixed(1));
+  }, [scoredLogs]);
 
-  const timelineData = useMemo(() => {
-    const sorted = [...filteredTrendLogs].sort((a, b) => new Date(a.date) - new Date(b.date));
+  const mostRecentAnalysis = useMemo(
+    () => (mostRecentLog ? getLogResult(mostRecentLog.id)?.analysis ?? null : null),
+    [mostRecentLog],
+  );
 
-    if (trendFilter === 'date') {
-      return sorted.map(l => ({
-        label: formatShortDate(l.date),
-        groupKey: l.date,
-        healthScore: l.healthScore,
-        baselineScore: null,
-        timingPull: l.timingPull,
-        sampleSize: 1,
-      }));
-    }
+  const boostSeries = useMemo(() => buildBoostSeries(mostRecentAnalysis), [mostRecentAnalysis]);
+  const timingSeries = useMemo(() => buildTimingSeries(mostRecentAnalysis), [mostRecentAnalysis]);
 
-    const grouped = sorted.reduce((acc, log) => {
-      let groupKey = null;
-      let label = null;
+  const recentLogCards = useMemo(
+    () => recentLogs.slice(0, 3).map((log) => {
+      const analysis = getLogResult(log.id)?.analysis ?? null;
+      const peakBoost = maxFinite((analysis?.chartData || []).map((point) => Number(point?.boost)));
+      const peakTiming = analysis?.metrics?.timingCorrections?.max_correction ?? log.timingPull ?? null;
+      return {
+        ...log,
+        peakBoost: peakBoost !== null ? Number(peakBoost.toFixed(1)) : null,
+        peakTiming: Number.isFinite(Number(peakTiming)) ? Number(peakTiming) : null,
+      };
+    }),
+    [recentLogs],
+  );
 
-      if (trendFilter === 'ethanol') {
-        groupKey = String(log.ethanol ?? '—');
-        label = `E${groupKey}`;
-      } else if (trendFilter === 'tune') {
-        groupKey = String(log.tune || 'Unknown');
-        label = groupKey;
-      } else if (trendFilter === 'ambient') {
-        const ambient = toNumericValue(log.ambientTemp);
-        if (ambient === null) return acc;
-        const bucketStart = Math.floor(ambient / 10) * 10;
-        const bucketEnd = bucketStart + 9;
-        groupKey = `${bucketStart}`;
-        label = `${bucketStart}–${bucketEnd}°F`;
-      } else if (trendFilter === 'month') {
-        const dt = new Date(log.date);
-        const month = String(dt.getMonth() + 1).padStart(2, '0');
-        groupKey = `${dt.getFullYear()}-${month}`;
-        label = formatMonthLabel(groupKey);
-      }
+  const healthBreakdown = mostRecentLog ? [
+    { label: 'Status', value: mostRecentLog.status },
+    { label: 'Timing Pull', value: mostRecentLog.timingPull !== null && mostRecentLog.timingPull !== undefined ? `${mostRecentLog.timingPull}°` : '—' },
+    { label: 'AFR Floor', value: mostRecentLog.afr ? String(mostRecentLog.afr) : '—' },
+    { label: 'Recent Logs', value: `${recentLogs.length}` },
+  ] : [];
 
-      if (!groupKey || !label) return acc;
-      if (!acc[groupKey]) acc[groupKey] = { key: groupKey, label, values: [], timing: [] };
-      acc[groupKey].values.push(log.healthScore);
-      const pull = toNumericValue(log.timingPull);
-      if (pull !== null) acc[groupKey].timing.push(pull);
-      return acc;
-    }, {});
+  const peakBoost = useMemo(
+    () => maxFinite((mostRecentAnalysis?.chartData || []).map((point) => Number(point?.boost))),
+    [mostRecentAnalysis],
+  );
 
-    return Object.values(grouped)
-      .sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }))
-      .map(group => ({
-        label: group.label,
-        groupKey: group.key,
-        healthScore: Number(average(group.values).toFixed(1)),
-        baselineScore: 75,
-        timingPull: average(group.timing) !== null ? Number(average(group.timing).toFixed(1)) : null,
-        sampleSize: group.values.length,
-      }));
-  }, [filteredTrendLogs, trendFilter]);
+  const worstTiming = useMemo(
+    () => minFinite(timingSeries.map((point) => Number(point.pull))),
+    [timingSeries],
+  );
 
   return (
     <div
       ref={rootRef}
-      className="space-y-8 animate-fade-in relative"
-      style={{ transform: pullDistance > 0 ? `translateY(${Math.min(pullDistance, 80) / 3}px)` : 'translateY(0)', transition: refreshing ? 'transform 0.2s ease' : 'none' }}
+      className="relative space-y-6 xl:space-y-7"
+      style={{
+        transform: pullDistance > 0 ? `translateY(${Math.min(pullDistance, 84) / 3}px)` : 'translateY(0)',
+        transition: refreshing ? 'transform 0.22s ease' : 'none',
+      }}
     >
       {(pullDistance > 0 || refreshing) && (
-        <div className="absolute left-1/2 -translate-x-1/2 -top-2 z-10">
-          <div className="px-3 py-1 rounded-full bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 text-[11px] font-semibold text-gray-500 dark:text-zinc-300 shadow-sm">
-            {refreshing ? 'Refreshing logs…' : pullDistance >= 70 ? 'Release to refresh' : 'Pull to refresh'}
+        <div className="absolute left-1/2 top-0 z-20 -translate-x-1/2 -translate-y-1/2">
+          <div className="app-pill px-3 py-1.5 text-[11px] font-semibold">
+            {refreshing ? 'Refreshing dashboard…' : pullDistance >= 70 ? 'Release to refresh' : 'Pull to refresh'}
           </div>
         </div>
       )}
-      <header className="mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight text-gray-900 dark:text-white">Dashboard</h1>
-        <p className="text-sm text-gray-500 dark:text-zinc-400 mt-1">Overview of your analysis tools and recent logs.</p>
-        <p className="text-xs text-gray-400 dark:text-zinc-500 mt-2">Batch tip: drag a folder of CSVs into Log Analyzer to quickly build trend baselines.</p>
-      </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <PageHeader
+        eyebrow="Control Center"
+        title="B58 Gen1 Overview"
+        description="Blend planning, log review, and tune health in one place."
+        meta={
+          <>
+            <MetricPill icon={CalendarClock} label="Last Log" value={mostRecentLog ? formatTimeAgo(mostRecentLog.date) : 'No data'} />
+            <MetricPill icon={ShieldCheck} label="Health Score" value={averageHealthScore ?? '—'} />
+            <MetricPill icon={Droplet} label="Target Blend" value={activeBlend ? `E${activeBlend.resultingBlend}` : 'Unset'} />
+            <MetricPill icon={FileText} label="Recent Logs" value={recentLogs.length} />
+          </>
+        }
+      />
 
-        {/* Left Column */}
-        <div className="lg:col-span-8 flex flex-col gap-6">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+        <div className="xl:col-span-5">
+          <SurfaceCard strong className="h-full">
+            <SectionTitle
+              icon={Zap}
+              title="Quick Start"
+              subtitle="Drop in a CSV, run instant health analysis, or jump straight into fuel planning."
+            />
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <ActionTile
+                to="/analyzer"
+                icon={Upload}
+                title="Upload Logs"
+                description="Drop in a BM3 or MHD CSV, run instant health analysis, and save the result to your garage."
+                meta="Analyzer workflow"
+                emphasized
+              />
+              <ActionTile
+                to="/calculator"
+                icon={Droplet}
+                title="Calculate Blend"
+                description="Set your current tank state and get precise E85 and pump instructions."
+                meta="Fuel workflow"
+              />
+            </div>
+          </SurfaceCard>
+        </div>
 
-          {/* Quick Start */}
-          <SectionPanel title="Quick Start" icon={Zap}>
-            <Link to="/viewer" className="flex flex-col items-center justify-center h-48 mt-4 rounded-xl border-2 border-dashed border-gray-200 dark:border-zinc-800 bg-gray-50/50 dark:bg-zinc-900/20 hover:bg-gray-50 dark:hover:bg-zinc-800/40 transition-colors text-gray-500 dark:text-zinc-400 cursor-pointer group">
-              <FileText size={32} className="mb-3 opacity-50 group-hover:opacity-80 group-hover:text-brand-500 transition-colors" strokeWidth={1.5} />
-              <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Open Log Viewer</p>
-              <p className="text-xs mt-1">Analyze a BM3 or MHD CSV</p>
-            </Link>
-          </SectionPanel>
+        <div className="xl:col-span-3">
+          <SurfaceCard strong className="h-full">
+            <SectionTitle
+              icon={Heart}
+              title="Tune Health Score"
+              subtitle="Latest confidence snapshot from your most recent analyzed pull."
+            />
+            <div className="mt-4">
+              {/* Ring + label row */}
+              <div className="flex items-center gap-4">
+                <div className="relative h-[96px] w-[96px] shrink-0">
+                  <HealthRing score={mostRecentLog?.healthScore ?? null} size={96} />
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-[2rem] font-semibold leading-none tracking-tight" style={{ color: scoreColor(mostRecentLog?.healthScore ?? null) }}>
+                      {mostRecentLog?.healthScore ?? '—'}
+                    </span>
+                    <span className="mt-0.5 text-[10px] app-muted">/ 100</span>
+                  </div>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-base font-semibold app-heading">{scoreLabel(mostRecentLog?.healthScore ?? null)}</p>
+                  <p className="mt-0.5 text-[12px] leading-snug app-muted">
+                    {mostRecentLog ? formatDate(mostRecentLog.date) : 'Upload a log to compute health.'}
+                  </p>
+                </div>
+              </div>
 
-          {/* Health Score Timeline */}
-          {timelineData.length >= 2 && (
-            <SectionPanel
-              title="Tune Health Timeline"
-              icon={TrendingUp}
-              action={(
-                <div className="flex items-center gap-2">
-                  <Upload size={12} className="text-gray-400 dark:text-zinc-500" />
-                  <select
-                    value={trendFilter}
-                    onChange={(event) => setTrendFilter(event.target.value)}
-                    className="text-xs rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 text-gray-600 dark:text-zinc-300"
-                  >
-                    <option value="date">By date</option>
-                    <option value="month">By month</option>
-                    <option value="ethanol">By ethanol</option>
-                    <option value="tune">By tune</option>
-                    <option value="ambient">By ambient temp</option>
-                  </select>
+              {/* Metrics 2-col grid */}
+              {healthBreakdown.length > 0 && (
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  {healthBreakdown.map((item) => (
+                    <div key={item.label} className="rounded border border-[var(--app-border)] bg-[var(--app-card-inset)] px-3 py-2.5">
+                      <p className="text-[10.5px] font-medium app-muted">{item.label}</p>
+                      <p className="mt-0.5 text-sm font-semibold app-heading">{item.value}</p>
+                    </div>
+                  ))}
                 </div>
               )}
-            >
-              <div className="mt-3 h-36">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={timelineData} margin={{ top: 4, right: 8, left: -24, bottom: 0 }}>
-                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#71717a' }} tickLine={false} axisLine={false} />
-                    <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#71717a' }} tickLine={false} axisLine={false} />
-                    <Tooltip content={<CustomTooltip />} />
-                    <ReferenceLine y={80} stroke="#22c55e" strokeDasharray="3 3" strokeOpacity={0.4} />
-                    <ReferenceLine y={55} stroke="#eab308" strokeDasharray="3 3" strokeOpacity={0.4} />
-                    {trendFilter !== 'date' && (
-                      <Line
-                        type="monotone"
-                        dataKey="baselineScore"
-                        stroke="#a1a1aa"
-                        strokeDasharray="4 4"
-                        dot={false}
-                        strokeWidth={1.5}
-                      />
-                    )}
-                    <Line
-                      type="monotone"
-                      dataKey="healthScore"
-                      stroke="#6366f1"
-                      strokeWidth={2}
-                      dot={(props) => {
-                        const { cx, cy, payload } = props;
-                        return (
-                          <circle key={payload.groupKey || payload.label} cx={cx} cy={cy} r={3}
-                            fill={scoreColor(payload.healthScore)} stroke="none" />
-                        );
-                      }}
-                      activeDot={{ r: 5 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-              <p className="text-[10px] text-gray-400 dark:text-zinc-600 mt-1 text-right">
-                {trendFilter === 'date'
-                  ? 'Per-log snapshots by date'
-                  : 'Trend mode: grouped averages with baseline at 75'}
-              </p>
-            </SectionPanel>
-          )}
+            </div>
+          </SurfaceCard>
+        </div>
 
-          {/* Recently Analyzed Logs */}
-          <SectionPanel
-            title="Recently Analyzed Logs"
-            icon={FileText}
-            action={recentLogs.length > 0 && (
-              <button onClick={handleClearLogs} className="flex items-center gap-1 text-xs text-gray-400 dark:text-zinc-500 hover:text-red-400 transition-colors">
-                <Trash2 size={12} /> Clear
-              </button>
-            )}
-          >
-            {recentLogs.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-24 mt-4 rounded-lg border border-dashed border-gray-200 dark:border-zinc-800 bg-gray-50/50 dark:bg-zinc-900/20 text-gray-500 dark:text-zinc-500">
-                <p className="text-xs font-medium">No logs analyzed yet.</p>
+        <div className="xl:col-span-4">
+          <SurfaceCard strong className="h-full">
+            <SectionTitle
+              icon={Droplet}
+              title="Active Blend"
+              subtitle={activeBlend ? 'Pinned blend target and recent fill instruction set.' : 'No active blend is currently pinned.'}
+              action={activeBlend ? (
+                <button
+                  onClick={() => {
+                    if (!window.confirm('Clear the active blend from the dashboard?')) return;
+                    clearActiveBlend();
+                    setActiveBlend(null);
+                  }}
+                  className="inline-flex items-center gap-1 text-xs font-medium app-muted transition-colors hover:text-red-500"
+                >
+                  <Trash2 size={13} />
+                  Clear
+                </button>
+              ) : null}
+            />
+
+            {activeBlend ? (
+              <div className="mt-4 space-y-3">
+                <div className="grid grid-cols-[1fr_auto] items-end gap-4">
+                  <div>
+                    <p className="text-[2.6rem] font-semibold leading-none tracking-tight app-heading">E{activeBlend.resultingBlend}</p>
+                    <p className="mt-3 text-sm app-muted">Estimated octane {activeBlend.resultingOctane ?? '—'} · {formatDate(activeBlend.date)}</p>
+                  </div>
+                  <StatusPill status={activeBlend.warnings?.length ? 'Caution' : 'Safe'} />
+                </div>
+
+                <div className="grid gap-2 md:grid-cols-2">
+                  <InsetCard>
+                    <p className="text-xs font-semibold uppercase tracking-wide app-muted">Target Blend</p>
+                    <p className="mt-2 text-2xl font-semibold tracking-tight app-heading">E{activeBlend.resultingBlend}</p>
+                  </InsetCard>
+                  <InsetCard>
+                    <p className="text-xs font-semibold uppercase tracking-wide app-muted">Peak Boost</p>
+                    <p className="mt-2 text-2xl font-semibold tracking-tight app-heading">{peakBoost !== null ? `${peakBoost.toFixed(1)} psi` : '—'}</p>
+                  </InsetCard>
+                </div>
+
+                <div className="grid gap-2 md:grid-cols-2">
+                  <InsetCard>
+                    <p className="text-xs font-semibold uppercase tracking-wide app-muted">E85 Mix</p>
+                    <p className="mt-2 text-2xl font-semibold tracking-tight app-heading">{activeBlend.e85Gallons} gal</p>
+                  </InsetCard>
+                  <InsetCard>
+                    <p className="text-xs font-semibold uppercase tracking-wide app-muted">Pump Mix</p>
+                    <p className="mt-2 text-2xl font-semibold tracking-tight app-heading">{activeBlend.pumpGallons} gal</p>
+                  </InsetCard>
+                </div>
               </div>
             ) : (
-              <div className="mt-3 flex flex-col gap-2">
-                {recentLogs.map(log => (
+              <InsetCard className="mt-5 flex min-h-[160px] items-center justify-center text-center">
+                <div className="space-y-2">
+                  <p className="text-sm font-medium app-heading">No active blend</p>
+                  <p className="text-sm app-muted">Use the calculator to pin an ethanol target and recent fill instructions.</p>
+                </div>
+              </InsetCard>
+            )}
+
+            <Link
+              to="/calculator"
+              className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded border border-[var(--app-border)] bg-[var(--app-card-inset)] px-4 py-2.5 text-sm font-medium app-heading transition-all hover:border-[var(--app-border-strong)] hover:text-brand-500"
+            >
+              <Droplet size={15} />
+              {activeBlend ? 'Recalculate Blend' : 'Calculate Target'}
+            </Link>
+          </SurfaceCard>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+        <SurfaceCard className="xl:col-span-5">
+          <SectionTitle
+            icon={FileText}
+            title="Recent Data Logs"
+            subtitle="Latest pulls from your garage-ready analysis history."
+            action={recentLogs.length > 0 ? (
+              <button
+                onClick={() => {
+                  if (!window.confirm('Clear all recent data logs from the dashboard history?')) return;
+                  clearRecentLogs();
+                  setRecentLogs([]);
+                }}
+                className="inline-flex items-center gap-1 text-xs font-medium app-muted transition-colors hover:text-red-500"
+              >
+                <Trash2 size={13} />
+                Clear
+              </button>
+            ) : null}
+          />
+
+          <div className="mt-4 space-y-3">
+            {recentLogCards.map((log, index) => (
+              <InsetCard key={log.id} className="p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <StatusPill status={log.status} />
+                      <span className="text-xs app-muted">{formatTimeAgo(log.date)}</span>
+                    </div>
+                    <div>
+                      <p className="text-[1.1rem] font-semibold tracking-[-0.03em] app-heading">Pull #{recentLogs.length - index}</p>
+                      <p className="mt-1 text-sm app-muted">{log.filename}</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[1.35rem] font-semibold tracking-tight" style={{ color: scoreColor(log.healthScore) }}>
+                      {log.healthScore ?? '—'}
+                    </p>
+                    <p className="text-xs app-muted">Health</p>
+                  </div>
+                </div>
+
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <div className="rounded border border-[var(--app-border)] px-3 py-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide app-muted">Peak Boost</p>
+                    <p className="mt-1 text-base font-semibold app-heading">{log.peakBoost !== null ? `${log.peakBoost} psi` : '—'}</p>
+                  </div>
+                  <div className="rounded border border-[var(--app-border)] px-3 py-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide app-muted">Peak Timing</p>
+                    <p className="mt-1 text-base font-semibold app-heading">{log.peakTiming !== null ? `${Math.abs(log.peakTiming).toFixed(1)}°` : '—'}</p>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex items-center justify-between">
                   <button
-                    key={log.id}
                     onClick={() => {
                       const result = getLogResult(log.id);
                       navigate('/analyzer', result?.analysis ? { state: { analysis: result.analysis } } : {});
                     }}
-                    className="flex items-center gap-3 p-3 rounded-lg bg-gray-50 dark:bg-zinc-900/40 border border-gray-100 dark:border-zinc-800 hover:border-brand-500/30 transition-colors group text-left w-full"
+                    className="inline-flex items-center gap-2 text-sm font-medium app-heading transition-colors hover:text-brand-500"
                   >
-                    <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase shrink-0 ${STATUS_COLOR[log.status] || STATUS_COLOR.Safe}`}>
-                      {STATUS_ICON[log.status]}
-                      {log.status}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{log.filename}</p>
-                      <p className="text-xs text-gray-400 dark:text-zinc-500">{log.engine} · E{log.ethanol} · {formatDate(log.date)}</p>
-                    </div>
-                    {log.healthScore !== null && log.healthScore !== undefined && (
-                      <span className="text-xs font-bold shrink-0" style={{ color: scoreColor(log.healthScore) }}>
-                        {log.healthScore}
-                      </span>
-                    )}
-                    {log.afr && <p className="text-xs text-gray-400 dark:text-zinc-500 shrink-0">AFR {log.afr}</p>}
-                    <ArrowRight size={14} className="text-gray-300 dark:text-zinc-600 group-hover:text-brand-400 transition-colors shrink-0" />
+                    View data log
+                    <ArrowRight size={14} />
                   </button>
-                ))}
-              </div>
+                  <span className="text-xs font-medium app-muted">{formatShortDate(log.date)}</span>
+                </div>
+              </InsetCard>
+            ))}
+
+            {recentLogs.length === 0 && (
+              <InsetCard className="flex min-h-[220px] items-center justify-center border-dashed text-center">
+                <div className="space-y-2">
+                  <p className="text-sm font-medium app-heading">No recent data logs yet</p>
+                  <p className="text-sm app-muted">Analyze your first CSV to populate the control center.</p>
+                </div>
+              </InsetCard>
             )}
-          </SectionPanel>
-
-        </div>
-
-        {/* Right Column */}
-        <div className="lg:col-span-4 flex flex-col gap-6">
-
-          {/* Tune Health Score */}
-          <SectionPanel title="Tune Health" icon={Heart}>
-            <div className="mt-2 mb-2">
-              <HealthScorePanel log={mostRecentLog} />
-              {mostRecentLog?.timingPull !== null && mostRecentLog?.timingPull !== undefined && (
-                <div className="mt-3 pt-3 border-t border-gray-100 dark:border-zinc-800 grid grid-cols-2 gap-2 text-xs">
-                  <div className="bg-gray-50 dark:bg-zinc-900/40 border border-gray-100 dark:border-zinc-800 rounded-lg p-2 text-center">
-                    <p className="font-bold text-gray-900 dark:text-white">{mostRecentLog.timingPull}°</p>
-                    <p className="text-gray-500 dark:text-zinc-500">Max Timing Pull</p>
-                  </div>
-                  {mostRecentLog.afr && (
-                    <div className="bg-gray-50 dark:bg-zinc-900/40 border border-gray-100 dark:border-zinc-800 rounded-lg p-2 text-center">
-                      <p className="font-bold text-gray-900 dark:text-white">{mostRecentLog.afr}</p>
-                      <p className="text-gray-500 dark:text-zinc-500">Min AFR</p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </SectionPanel>
-
-          {/* Active Blend */}
-          <SectionPanel
-            title="Active Blend"
-            icon={Droplet}
-            action={activeBlend && (
-              <button onClick={handleClearBlend} className="flex items-center gap-1 text-xs text-gray-400 dark:text-zinc-500 hover:text-red-400 transition-colors">
-                <Trash2 size={12} /> Clear
-              </button>
-            )}
-          >
-            {activeBlend ? (
-              <div className="mt-2 mb-4">
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="w-12 h-12 rounded-lg bg-brand-500/10 border border-brand-500/20 flex items-center justify-center text-brand-500 font-bold text-sm">
-                    E{activeBlend.resultingBlend}
-                  </div>
-                  <div>
-                    <p className="font-semibold text-gray-900 dark:text-white">E{activeBlend.resultingBlend} Blend</p>
-                    <p className="text-xs text-gray-500 dark:text-zinc-400 mt-0.5">{formatDate(activeBlend.date)}</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="bg-brand-50 dark:bg-brand-500/5 border border-brand-200 dark:border-brand-500/20 rounded-lg p-2 text-center">
-                    <p className="text-brand-600 dark:text-brand-400 font-bold text-base">{activeBlend.e85Gallons} gal</p>
-                    <p className="text-gray-500 dark:text-zinc-400">E85</p>
-                  </div>
-                  <div className="bg-gray-50 dark:bg-zinc-900/40 border border-gray-200 dark:border-zinc-800 rounded-lg p-2 text-center">
-                    <p className="text-gray-800 dark:text-white font-bold text-base">{activeBlend.pumpGallons} gal</p>
-                    <p className="text-gray-500 dark:text-zinc-400">{activeBlend.pumpOctane ?? 93} Oct</p>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center gap-4 mt-2 mb-6">
-                <div className="w-12 h-12 rounded-lg bg-gray-100 dark:bg-zinc-800/80 border border-gray-200 dark:border-zinc-700 flex items-center justify-center text-gray-400 dark:text-zinc-500 font-medium text-lg">—</div>
-                <div>
-                  <p className="font-semibold text-gray-900 dark:text-white">None Active</p>
-                  <p className="text-xs text-gray-500 dark:text-zinc-400 mt-0.5">Calculate blend to view</p>
-                </div>
-              </div>
-            )}
-            <Link to="/calculator" className="flex items-center justify-center w-full py-2 bg-white dark:bg-[#121214] border border-gray-200 dark:border-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-800/80 text-gray-900 dark:text-white rounded-lg shadow-sm text-sm font-medium transition-colors gap-2">
-              <Settings2 size={16} strokeWidth={1.5} />
-              {activeBlend ? 'Recalculate' : 'Configure Target'}
-            </Link>
-          </SectionPanel>
-
-          {/* Quick Actions */}
-          <div className="flex flex-col gap-3">
-            <h2 className="text-xs font-semibold tracking-wide text-gray-500 dark:text-zinc-500 uppercase px-1 mt-2">Quick Actions</h2>
-            <Link to="/calculator" className="flex items-center gap-3 w-full p-3 bg-white dark:bg-[#121214] border border-gray-200 dark:border-zinc-800/80 rounded-xl shadow-sm hover:border-brand-500/50 hover:bg-brand-50/50 dark:hover:bg-brand-500/5 transition-all group">
-              <div className="bg-brand-50 dark:bg-brand-500/10 text-brand-600 dark:text-brand-400 p-2 rounded-lg border border-brand-100 dark:border-brand-500/20">
-                <Droplet size={16} strokeWidth={2} />
-              </div>
-              <span className="text-sm font-medium text-gray-900 dark:text-white group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">Calculate Content</span>
-              <ArrowRight size={16} className="ml-auto text-gray-400 dark:text-zinc-500 group-hover:text-brand-600 dark:group-hover:text-brand-400 group-hover:translate-x-0.5 transition-all" strokeWidth={1.5} />
-            </Link>
-            <Link to="/viewer" className="flex items-center gap-3 w-full p-3 bg-white dark:bg-[#121214] border border-gray-200 dark:border-zinc-800/80 rounded-xl shadow-sm hover:border-gray-300 dark:hover:border-zinc-600 hover:bg-gray-50 dark:hover:bg-zinc-800/50 transition-all group">
-              <div className="bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 p-2 rounded-lg border border-gray-200 dark:border-zinc-700">
-                <MonitorPlay size={16} strokeWidth={2} />
-              </div>
-              <span className="text-sm font-medium text-gray-900 dark:text-white transition-colors">View Data Log</span>
-              <ArrowRight size={16} className="ml-auto text-gray-400 dark:text-zinc-500 group-hover:text-gray-900 dark:group-hover:text-white group-hover:translate-x-0.5 transition-all" strokeWidth={1.5} />
-            </Link>
           </div>
+        </SurfaceCard>
 
+        <div className="grid gap-4 xl:col-span-7 xl:grid-cols-2">
+          <ChartCard
+            icon={TrendingUp}
+            title={boostSeries.label === 'RPM' ? 'Boost vs RPM' : 'Boost Trace'}
+            subtitle="Latest session telemetry, tuned for quick scanability."
+          >
+            {boostSeries.data.length >= 2 ? (
+              <>
+                <div className="surface-inset h-[240px] p-3">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={boostSeries.data} margin={{ top: 6, right: 8, left: -22, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="boostFill" x1="0" x2="0" y1="0" y2="1">
+                          <stop offset="0%" stopColor="#2dd4bf" stopOpacity={0.34} />
+                          <stop offset="100%" stopColor="#2dd4bf" stopOpacity={0.02} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid stroke="var(--app-chart-grid)" vertical={false} />
+                      <XAxis dataKey="axisValue" tick={{ fontSize: 11, fill: 'var(--app-chart-axis-muted)' }} tickLine={false} axisLine={false} />
+                      <YAxis tick={{ fontSize: 11, fill: 'var(--app-chart-axis-muted)' }} tickLine={false} axisLine={false} />
+                      <Tooltip content={<TrendTooltip />} />
+                      <Area type="monotone" dataKey="boost" name="Boost" stroke="#2dd4bf" strokeWidth={2.4} fill="url(#boostFill)" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+                <p className="mt-3 text-xs app-muted">
+                  {boostSeries.label === 'RPM' ? 'Boost plotted directly against RPM from the latest analyzed pull.' : 'Boost trace from the latest analyzed pull.'}
+                </p>
+              </>
+            ) : (
+              <InsetCard className="flex min-h-[240px] items-center justify-center text-center">
+                <div className="space-y-2">
+                  <p className="text-sm font-medium app-heading">No boost curve available yet</p>
+                  <p className="text-sm app-muted">Analyze a pull with boost telemetry to populate this card.</p>
+                </div>
+              </InsetCard>
+            )}
+          </ChartCard>
+
+          <ChartCard
+            icon={Activity}
+            title="Timing vs RPM"
+            subtitle="Worst timing pull by RPM band from the latest log."
+          >
+            {timingSeries.length >= 2 ? (
+              <>
+                <div className="surface-inset h-[240px] p-3">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={timingSeries} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
+                      <CartesianGrid stroke="var(--app-chart-grid)" vertical={false} />
+                      <XAxis dataKey="rpm" tick={{ fontSize: 11, fill: 'var(--app-chart-axis-muted)' }} tickLine={false} axisLine={false} />
+                      <YAxis tick={{ fontSize: 11, fill: 'var(--app-chart-axis-muted)' }} tickLine={false} axisLine={false} />
+                      <Tooltip content={<TrendTooltip />} />
+                      <Line
+                        type="monotone"
+                        dataKey="pull"
+                        name="Timing Pull"
+                        stroke="#a855f7"
+                        strokeWidth={2.4}
+                        dot={{ r: 2.5, fill: '#a855f7' }}
+                        activeDot={{ r: 4 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="mt-3 flex items-center justify-between text-xs app-muted">
+                  <span>Worst pull {worstTiming !== null ? `${worstTiming.toFixed(1)}°` : '—'}</span>
+                  <span>{timingSeries.length} sampled buckets</span>
+                </div>
+              </>
+            ) : (
+              <InsetCard className="flex min-h-[240px] items-center justify-center text-center">
+                <div className="space-y-2">
+                  <p className="text-sm font-medium app-heading">Timing map will appear after analysis</p>
+                  <p className="text-sm app-muted">Logs with timing correction columns surface an RPM-based pull curve here.</p>
+                </div>
+              </InsetCard>
+            )}
+          </ChartCard>
         </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <SurfaceCard>
+          <SectionTitle icon={ShieldCheck} title="Health Score" subtitle="Confidence snapshot across your latest sessions." />
+          <div className="mt-5">
+            <p className="text-[2.2rem] font-semibold tracking-[-0.04em] app-heading">{averageHealthScore ?? '—'}</p>
+            <p className="mt-2 text-sm app-muted">Average of your recent analyzed pulls.</p>
+          </div>
+        </SurfaceCard>
+
+        <SurfaceCard>
+          <SectionTitle icon={Flame} title="AFR Floor" subtitle="Leanest meaningful AFR from the current snapshot." />
+          <div className="mt-5">
+            <p className="text-[2.2rem] font-semibold tracking-[-0.04em] app-heading">{mostRecentLog?.afr ?? '—'}</p>
+            <p className="mt-2 text-sm app-muted">Based on the most recent saved analysis.</p>
+          </div>
+        </SurfaceCard>
+
+        <SurfaceCard>
+          <SectionTitle icon={FileText} title="Recent Logs" subtitle="How much fresh data is feeding the control center." />
+          <div className="mt-5">
+            <p className="text-[2.2rem] font-semibold tracking-[-0.04em] app-heading">{recentLogs.length}</p>
+            <p className="mt-2 text-sm app-muted">Saved pulls ready to reopen in the analyzer.</p>
+          </div>
+        </SurfaceCard>
       </div>
     </div>
   );
-};
-
-const SectionPanel = ({ title, icon: Icon, action, children }) => (
-  <div className="bg-white dark:bg-[#121214] border border-gray-200 dark:border-zinc-800/80 rounded-xl p-5 shadow-sm">
-    <div className="flex items-center justify-between mb-2">
-      <div className="flex items-center gap-2 text-gray-900 dark:text-white">
-        {Icon && <Icon size={16} className="text-gray-500 dark:text-zinc-400" strokeWidth={1.5} />}
-        <h2 className="text-sm font-semibold">{title}</h2>
-      </div>
-      {action && <div>{action}</div>}
-    </div>
-    {children}
-  </div>
-);
-
-export default Dashboard;
+}

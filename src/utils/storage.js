@@ -26,28 +26,7 @@ const MAX_RECENT_LOGS = 10;
 export function getRecentLogs() {
   try {
     const logs = JSON.parse(localStorage.getItem(KEYS.RECENT_LOGS) || '[]');
-    if (!Array.isArray(logs)) return [];
-
-    let updatedAny = false;
-    const updated = logs.map(log => {
-      try {
-        const full = JSON.parse(localStorage.getItem(`${KEYS.LOG_RESULTS}_${log.id}`) || 'null');
-        const recalculated = computeHealthScore(full);
-        if (recalculated !== null && log.healthScore !== recalculated) {
-          updatedAny = true;
-          return { ...log, healthScore: recalculated };
-        }
-      } catch {
-        // ignore malformed per-log payload
-      }
-      return log;
-    });
-
-    if (updatedAny) {
-      localStorage.setItem(KEYS.RECENT_LOGS, JSON.stringify(updated));
-    }
-
-    return updated;
+    return Array.isArray(logs) ? logs : [];
   } catch {
     return [];
   }
@@ -283,8 +262,11 @@ export function clearActiveBlend() {
 const SETTINGS_DEFAULTS = {
   theme:          'system',
   units:          'US',
-  downsampling:   'Original (All Data)',
+  downsampling:   'High Quality (1600 pts)',
   lineThickness:  'Normal (1.5px)',
+  timeFormat:     'Elapsed (Seconds)',
+  defaultPreset:  'None (Clear)',
+  compactView:    false,
   blendResultUnit: 'auto',
 };
 

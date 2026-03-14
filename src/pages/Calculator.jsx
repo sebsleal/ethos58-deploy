@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { calculateBlend, calculateResultingOctane, reverseCalculateBlend, calibratePumpEthanol, estimateBlendFillCost, planEthanolOverTanks } from '../utils/blendMath';
 import {
@@ -17,6 +17,7 @@ import {
 import { trackEvent, trackError } from '../utils/telemetry';
 import { hapticSuccess, hapticWarning, hapticError, hapticLight } from '../utils/haptics';
 import { Droplet, AlertTriangle, BookmarkPlus, Bookmark, Trash2, RotateCcw, MapPin, Star, ChevronDown, Calculator as CalculatorIcon, Route } from 'lucide-react';
+import { PageHeader } from '../components/ui';
 
 const LITERS_PER_GALLON = 3.78541;
 
@@ -28,7 +29,8 @@ function roundTo(value, decimals = 2) {
 }
 
 const Calculator = () => {
-  const plannerDefaults = getFuelPlannerDefaults();
+  const [settings] = useState(getSettings);
+  const [plannerDefaults] = useState(getFuelPlannerDefaults);
   const [mode, setMode] = useState('blend'); // 'blend' | 'refuel' | 'planner'
   const [formData, setFormData] = useState({
     currentFuel: 5.0,
@@ -39,15 +41,14 @@ const Calculator = () => {
   const [precisionMode, setPrecisionMode] = useState(false);
   const [pumpOctane, setPumpOctane] = useState(93);
   const [pumpEthanol, setPumpEthanol] = useState(0);
-  const [volumeUnit, setVolumeUnit] = useState(() => (getSettings().units === 'Metric' ? 'L' : 'gal'));
+  const [volumeUnit, setVolumeUnit] = useState(() => (settings.units === 'Metric' ? 'L' : 'gal'));
   const [tankCapacityUnit, setTankCapacityUnit] = useState(() => {
     if (plannerDefaults.tankCapacityUnit === 'L' || plannerDefaults.tankCapacityUnit === 'gal') {
       return plannerDefaults.tankCapacityUnit;
     }
-    return getSettings().units === 'Metric' ? 'L' : 'gal';
+    return settings.units === 'Metric' ? 'L' : 'gal';
   });
   const [resultVolumeUnit, setResultVolumeUnit] = useState(() => {
-    const settings = getSettings();
     if (settings.blendResultUnit === 'L' || settings.blendResultUnit === 'gal') return settings.blendResultUnit;
     return settings.units === 'Metric' ? 'L' : 'gal';
   });
@@ -63,7 +64,6 @@ const Calculator = () => {
   const [refuelPumpEthanol, setRefuelPumpEthanol] = useState(0);
   const [refuelResult, setRefuelResult] = useState(null);
   const [refuelAddUnit, setRefuelAddUnit] = useState(() => {
-    const settings = getSettings();
     if (settings.refuelAddUnit === 'L' || settings.refuelAddUnit === 'gal') return settings.refuelAddUnit;
     return settings.units === 'Metric' ? 'L' : 'gal';
   });
@@ -79,6 +79,7 @@ const Calculator = () => {
   const [fillCostResult, setFillCostResult] = useState(null);
   const [tankCount, setTankCount] = useState(plannerDefaults.tankCount || 3);
   const [tripPlan, setTripPlan] = useState([]);
+  const profileMenuRef = useRef(null);
 
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return undefined;
@@ -120,6 +121,19 @@ const Calculator = () => {
       tankCapacityUnit,
     });
   }, [calibrationInput, calibratedPumpE, stationE85Price, stationPumpPrice, tankCount, tankCapacityUnit]);
+
+  useEffect(() => {
+    if (!showProfileMenu) return undefined;
+
+    const handlePointerDown = (event) => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target)) {
+        setShowProfileMenu(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [showProfileMenu]);
 
   const toDisplayVolume = (gallons) => {
     if (gallons === '' || gallons === null || gallons === undefined) return '';
@@ -281,6 +295,7 @@ const Calculator = () => {
   };
 
   const handleDeleteProfile = (name) => {
+    if (!window.confirm(`Delete the saved profile "${name}"?`)) return;
     deleteBlendProfile(name);
     setProfiles(getBlendProfiles());
   };
@@ -381,44 +396,44 @@ const Calculator = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <header className="mb-6 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-gray-100 flex items-center gap-3">
-            <Droplet className="text-brand-500" size={26} />
-            Ethanol Blend Calculator
-          </h1>
-          <p className="text-slate-500 dark:text-gray-400 mt-1.5 text-sm">Dial in your precise E-mix for your B58 tune.</p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <div className="flex rounded-lg border border-slate-200 dark:border-white/10 overflow-hidden">
+      <PageHeader
+        eyebrow="Fuel"
+        title="Ethanol Blend Calculator"
+        description="Dial in your blend, refuel predictions, and multi-tank planning with the same layered control system used across the rest of the app."
+        action={(
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="app-toggle-group">
             <button
               onClick={() => handleVolumeUnitChange('gal')}
-              className={`px-3 py-2 text-xs font-bold transition-colors ${volumeUnit === 'gal' ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-white dark:bg-zinc-900 text-slate-500 dark:text-gray-400 hover:bg-slate-50'}`}
+              className={volumeUnit === 'gal' ? 'app-toggle-option app-toggle-option-active px-3 py-2 text-xs font-bold' : 'app-toggle-option px-3 py-2 text-xs font-bold'}
+              aria-pressed={volumeUnit === 'gal'}
             >
               Gallons
             </button>
             <button
               onClick={() => handleVolumeUnitChange('L')}
-              className={`px-3 py-2 text-xs font-bold transition-colors ${volumeUnit === 'L' ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-white dark:bg-zinc-900 text-slate-500 dark:text-gray-400 hover:bg-slate-50'}`}
+              className={volumeUnit === 'L' ? 'app-toggle-option app-toggle-option-active px-3 py-2 text-xs font-bold' : 'app-toggle-option px-3 py-2 text-xs font-bold'}
+              aria-pressed={volumeUnit === 'L'}
             >
               Litres
             </button>
           </div>
           {profileNames.length > 0 && (
-            <div className="relative">
+            <div className="relative" ref={profileMenuRef}>
               <button
                 onClick={() => setShowProfileMenu(v => !v)}
-                className="flex items-center gap-2 text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-zinc-900 text-slate-700 dark:text-gray-300 hover:border-brand-400 transition-colors"
+                className="app-button-secondary flex items-center gap-2 px-3 py-2 text-xs font-semibold"
+                aria-expanded={showProfileMenu}
+                aria-haspopup="menu"
               >
                 <Bookmark size={14} className="text-brand-500" /> Profiles <ChevronDown size={12} />
               </button>
               {showProfileMenu && (
-                <div className="absolute right-0 top-full mt-1 z-20 w-52 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-white/10 rounded-xl shadow-lg py-1 overflow-hidden">
+                <div className="surface-card absolute right-0 top-full z-20 mt-1 w-52 overflow-hidden py-1" role="menu">
                   {profileNames.map(name => (
-                    <div key={name} className="flex items-center group px-3 py-2 hover:bg-slate-50 dark:hover:bg-zinc-800">
-                      <button onClick={() => handleLoadProfile(name)} className="flex-1 text-left text-sm text-slate-700 dark:text-gray-200 truncate">{name}</button>
-                      <button onClick={() => handleDeleteProfile(name)} className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-all p-0.5">
+                    <div key={name} className="group flex items-center px-3 py-2 hover:bg-[var(--app-card-inset)]/70">
+                      <button onClick={() => handleLoadProfile(name)} className="app-heading flex-1 truncate text-left text-sm" role="menuitem">{name}</button>
+                      <button onClick={() => handleDeleteProfile(name)} className="p-0.5 text-red-400 opacity-0 transition-all group-hover:opacity-100 hover:text-red-600" aria-label={`Delete profile ${name}`}>
                         <Trash2 size={12} />
                       </button>
                     </div>
@@ -429,12 +444,14 @@ const Calculator = () => {
           )}
           <button
             onClick={() => setShowProfileSave(v => !v)}
-            className="flex items-center gap-2 text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-zinc-900 text-slate-700 dark:text-gray-300 hover:border-brand-400 transition-colors"
+            className="app-button-secondary flex items-center gap-2 px-3 py-2 text-xs font-semibold"
+            aria-pressed={showProfileSave}
           >
             <BookmarkPlus size={14} className="text-brand-500" /> Save Profile
           </button>
         </div>
-      </header>
+        )}
+      />
 
       {showProfileSave && (
         <div className="flex items-center gap-2 p-3 bg-brand-50 dark:bg-brand-500/5 border border-brand-200 dark:border-brand-500/20 rounded-xl animate-fade-in">
@@ -446,18 +463,21 @@ const Calculator = () => {
             className="flex-1 bg-transparent text-sm text-slate-800 dark:text-gray-200 outline-none placeholder-slate-400 dark:placeholder-gray-600"
           />
           <button onClick={handleSaveProfile} className="text-xs font-bold text-brand-600 dark:text-brand-400 hover:text-brand-700 px-2 py-1 rounded-md bg-brand-100 dark:bg-brand-500/20 transition-colors">Save</button>
-          <button onClick={() => setShowProfileSave(false)} className="text-slate-400 hover:text-slate-600 text-xs px-1">✕</button>
+          <button onClick={() => setShowProfileSave(false)} className="text-slate-400 hover:text-slate-600 text-xs px-1" aria-label="Close save profile panel">✕</button>
         </div>
       )}
 
-      <div className="flex gap-1 p-1 bg-slate-100 dark:bg-zinc-900 border border-slate-200 dark:border-white/5 rounded-xl w-fit">
+      <div className="app-toggle-group w-fit">
         {[
           { key: 'blend', label: 'Blend Calculator' },
           { key: 'refuel', label: 'Refuel Planner' },
           { key: 'planner', label: 'Fuel Planner' },
         ].map(m => (
-          <button key={m.key} onClick={() => setMode(m.key)}
-            className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-colors ${mode === m.key ? 'bg-white dark:bg-zinc-800 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-gray-400 hover:text-slate-700'}`}
+          <button
+            key={m.key}
+            onClick={() => setMode(m.key)}
+            className={mode === m.key ? 'app-toggle-option app-toggle-option-active px-4 py-1.5 text-xs font-bold' : 'app-toggle-option px-4 py-1.5 text-xs font-bold'}
+            aria-pressed={mode === m.key}
           >
             {m.label}
           </button>
@@ -512,7 +532,7 @@ const Calculator = () => {
 
       {mode === 'planner' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-white/5 rounded-2xl p-6 shadow-sm dark:shadow-none space-y-6">
+          <div className="surface-card p-6 space-y-6">
             <div>
               <h2 className="text-base font-bold text-slate-900 dark:text-gray-100 mb-1">Planner Inputs</h2>
               <p className="text-sm text-slate-500 dark:text-gray-400">These are the core values Fuel Planner uses. Set them here first so cost comparisons and trip plans are based on the right tank state.</p>
@@ -545,8 +565,8 @@ const Calculator = () => {
               <h2 className="text-base font-bold text-slate-900 dark:text-gray-100 mb-1">Pump Ethanol Calibration</h2>
               <p className="text-sm text-slate-500 dark:text-gray-400">Optional. If you tested the pump with a vial, paste 2-4 readings and Ethos will average them. If you skip this, the planner uses the Pump Ethanol setting from Blend Calculator.</p>
               <div className="flex gap-2 mt-3">
-                <input type="text" value={calibrationInput} onChange={e => setCalibrationInput(e.target.value)} className="flex-1 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-sm" placeholder="72, 75, 73" />
-                <button onClick={handleCalibratePump} className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-900 dark:bg-brand-500 text-white">Calibrate</button>
+                <input type="text" value={calibrationInput} onChange={e => setCalibrationInput(e.target.value)} className="app-input flex-1 px-3 py-2 text-sm" placeholder="72, 75, 73" />
+                <button onClick={handleCalibratePump} className="app-button-primary px-3 py-2 text-xs font-bold">Calibrate</button>
               </div>
               {calibratedPumpE !== null
                 ? <p className="text-xs mt-2 text-brand-500 font-semibold">Using calibrated pump ethanol: E{calibratedPumpE}</p>
@@ -557,20 +577,30 @@ const Calculator = () => {
               <h2 className="text-base font-bold text-slate-900 dark:text-gray-100 mb-1">Station Presets</h2>
               <p className="text-sm text-slate-500 dark:text-gray-400">Optional. Save a station name plus current E85 and pump-gas prices so the planner can compare fill cost across locations.</p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3">
-                <input type="text" placeholder="Station name" value={stationName} onChange={e => setStationName(e.target.value)} className="bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-sm" />
-                <input type="number" step="0.01" placeholder="E85 $/gal" value={stationE85Price} onChange={e => setStationE85Price(parseFloat(e.target.value) || 0)} className="bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-sm" />
-                <input type="number" step="0.01" placeholder="Pump $/gal" value={stationPumpPrice} onChange={e => setStationPumpPrice(parseFloat(e.target.value) || 0)} className="bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-sm" />
+                <input type="text" placeholder="Station name" value={stationName} onChange={e => setStationName(e.target.value)} className="app-input px-3 py-2 text-sm" />
+                <input type="number" step="0.01" placeholder="E85 $/gal" value={stationE85Price} onChange={e => setStationE85Price(parseFloat(e.target.value) || 0)} className="app-input px-3 py-2 text-sm" />
+                <input type="number" step="0.01" placeholder="Pump $/gal" value={stationPumpPrice} onChange={e => setStationPumpPrice(parseFloat(e.target.value) || 0)} className="app-input px-3 py-2 text-sm" />
               </div>
               <div className="flex gap-2 mt-3">
-                <button onClick={handleSaveStation} className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-900 dark:bg-brand-500 text-white">Save Station</button>
-                <button onClick={runCostOptimization} className="px-3 py-2 rounded-xl text-xs font-bold border border-slate-200 dark:border-white/10 text-slate-700 dark:text-gray-200">Compare Fill Cost</button>
+                <button onClick={handleSaveStation} className="app-button-primary px-3 py-2 text-xs font-bold">Save Station</button>
+                <button onClick={runCostOptimization} className="app-button-secondary px-3 py-2 text-xs font-bold">Compare Fill Cost</button>
               </div>
               {stationNames.length > 0 && (
                 <div className="mt-3 space-y-2">
                   {stationNames.map(name => (
-                    <div key={name} className="flex items-center justify-between border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2">
-                      <button onClick={() => handleSelectStation(name)} className="text-sm text-slate-700 dark:text-gray-200">{name}</button>
-                      <button onClick={() => { deleteStationPreset(name); setStationPresets(getStationPresets()); }} className="text-red-500"><Trash2 size={14} /></button>
+                    <div key={name} className="surface-inset flex items-center justify-between px-3 py-2">
+                      <button onClick={() => handleSelectStation(name)} className="text-sm app-heading">{name}</button>
+                      <button
+                        onClick={() => {
+                          if (!window.confirm(`Delete the station preset "${name}"?`)) return;
+                          deleteStationPreset(name);
+                          setStationPresets(getStationPresets());
+                        }}
+                        className="text-red-500"
+                        aria-label={`Delete station preset ${name}`}
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -582,27 +612,29 @@ const Calculator = () => {
               <h2 className="text-base font-bold text-slate-900 dark:text-gray-100 mb-1">Trip Planner</h2>
               <p className="text-sm text-slate-500 dark:text-gray-400">Required input: how many future tanks you want to plan. Ethos will use the planner inputs above and the current pump ethanol value to estimate each fill.</p>
               <div className="flex gap-2 mt-3">
-                <input type="number" min="1" max="20" value={tankCount} onChange={e => setTankCount(parseInt(e.target.value, 10) || 1)} className="w-24 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-sm" />
-                <button onClick={runTripPlan} className="px-3 py-2 rounded-xl text-xs font-bold border border-slate-200 dark:border-white/10 text-slate-700 dark:text-gray-200">Build Plan</button>
+                <input type="number" min="1" max="20" value={tankCount} onChange={e => setTankCount(parseInt(e.target.value, 10) || 1)} className="app-input w-24 px-3 py-2 text-sm" />
+                <button onClick={runTripPlan} className="app-button-secondary px-3 py-2 text-xs font-bold">Build Plan</button>
               </div>
             </div>
           </div>
 
-          <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-white/5 rounded-2xl p-6 shadow-sm dark:shadow-none space-y-5">
+          <div className="surface-card p-6 space-y-5">
             <div className="flex items-center justify-between gap-4">
               <h2 className="text-base font-bold text-slate-900 dark:text-gray-100">Fuel Planner Output</h2>
               <div className="flex items-center gap-2">
                 <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-gray-400">Result Unit</span>
-                <div className="flex rounded-lg border border-slate-200 dark:border-white/10 overflow-hidden">
+                <div className="app-toggle-group">
                   <button
                     onClick={() => handleResultVolumeUnitChange('gal')}
-                    className={`px-3 py-1.5 text-xs font-bold transition-colors ${resultVolumeUnit === 'gal' ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-white dark:bg-zinc-950 text-slate-500 dark:text-gray-400 hover:bg-slate-50'}`}
+                    className={resultVolumeUnit === 'gal' ? 'app-toggle-option app-toggle-option-active px-3 py-1.5 text-xs font-bold' : 'app-toggle-option px-3 py-1.5 text-xs font-bold'}
+                    aria-pressed={resultVolumeUnit === 'gal'}
                   >
                     Gallons
                   </button>
                   <button
                     onClick={() => handleResultVolumeUnitChange('L')}
-                    className={`px-3 py-1.5 text-xs font-bold transition-colors ${resultVolumeUnit === 'L' ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-white dark:bg-zinc-950 text-slate-500 dark:text-gray-400 hover:bg-slate-50'}`}
+                    className={resultVolumeUnit === 'L' ? 'app-toggle-option app-toggle-option-active px-3 py-1.5 text-xs font-bold' : 'app-toggle-option px-3 py-1.5 text-xs font-bold'}
+                    aria-pressed={resultVolumeUnit === 'L'}
                   >
                     Litres
                   </button>
@@ -664,7 +696,7 @@ const Calculator = () => {
 
 const BlendPane = ({ precisionMode, setPrecisionMode, pumpOctane, setPumpOctane, pumpEthanol, setPumpEthanol, resultVolumeUnit, handleResultVolumeUnitChange, volumeLabel, tankCapacityLabel, formData, toDisplayVolume, toDisplayTankCapacity, handleChange, handleTankCapacityUnitChange, tankCapacityUnit, calculate, error, result, formatResultVolume, resultVolumeLabel }) => (
   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-    <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-white/5 rounded-2xl p-6 shadow-sm dark:shadow-none">
+    <div className="surface-card p-6">
       <div className="flex justify-between items-center mb-4 border-b border-slate-100 dark:border-white/5 pb-4">
         <h2 className="text-base font-bold text-slate-900 dark:text-gray-100">Parameters</h2>
         <div className="flex items-center gap-3">
@@ -672,7 +704,13 @@ const BlendPane = ({ precisionMode, setPrecisionMode, pumpOctane, setPumpOctane,
             <span className="text-xs font-semibold text-slate-500 dark:text-gray-400 block">Precision Mode</span>
             {precisionMode && <span className="text-[10px] text-brand-500 font-bold uppercase tracking-wider">staged fill</span>}
           </div>
-          <button onClick={() => setPrecisionMode(!precisionMode)} className={`w-10 h-5 rounded-full transition-colors relative ${precisionMode ? 'bg-brand-500' : 'bg-slate-200 dark:bg-zinc-700'}`}>
+          <button
+            onClick={() => setPrecisionMode(!precisionMode)}
+            className={`relative h-5 w-10 rounded-full transition-colors ${precisionMode ? 'bg-brand-500' : 'bg-slate-200 dark:bg-zinc-700'}`}
+            role="switch"
+            aria-checked={precisionMode}
+            aria-label="Toggle precision mode"
+          >
             <div className={`w-3.5 h-3.5 rounded-full bg-white absolute top-[3px] transition-transform shadow-sm ${precisionMode ? 'translate-x-5' : 'translate-x-1'}`} />
           </button>
         </div>
@@ -681,7 +719,7 @@ const BlendPane = ({ precisionMode, setPrecisionMode, pumpOctane, setPumpOctane,
         <span className="text-xs font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wide">Pump Octane</span>
         <div className="flex rounded-lg border border-slate-200 dark:border-white/10 overflow-hidden">
           {[91, 93].map(oct => (
-            <button key={oct} onClick={() => setPumpOctane(oct)} className={`px-4 py-1.5 text-xs font-bold transition-colors ${pumpOctane === oct ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-white dark:bg-zinc-950 text-slate-500 dark:text-gray-400 hover:bg-slate-50'}`}>{oct}</button>
+            <button key={oct} onClick={() => setPumpOctane(oct)} className={`px-4 py-1.5 text-xs font-bold transition-colors ${pumpOctane === oct ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-white dark:bg-zinc-950 text-slate-500 dark:text-gray-400 hover:bg-slate-50'}`} aria-pressed={pumpOctane === oct}>{oct}</button>
           ))}
         </div>
       </div>
@@ -692,15 +730,15 @@ const BlendPane = ({ precisionMode, setPrecisionMode, pumpOctane, setPumpOctane,
         </div>
         <div className="flex rounded-lg border border-slate-200 dark:border-white/10 overflow-hidden">
           {[0, 10].map(e => (
-            <button key={e} onClick={() => setPumpEthanol(e)} className={`px-4 py-1.5 text-xs font-bold transition-colors ${pumpEthanol === e ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-white dark:bg-zinc-950 text-slate-500 dark:text-gray-400 hover:bg-slate-50'}`}>E{e}</button>
+            <button key={e} onClick={() => setPumpEthanol(e)} className={`px-4 py-1.5 text-xs font-bold transition-colors ${pumpEthanol === e ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-white dark:bg-zinc-950 text-slate-500 dark:text-gray-400 hover:bg-slate-50'}`} aria-pressed={pumpEthanol === e}>E{e}</button>
           ))}
         </div>
       </div>
       <div className="flex items-center justify-between mb-6">
         <span className="text-xs font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wide">Result Display Unit</span>
         <div className="flex rounded-lg border border-slate-200 dark:border-white/10 overflow-hidden">
-          <button onClick={() => handleResultVolumeUnitChange('gal')} className={`px-4 py-1.5 text-xs font-bold transition-colors ${resultVolumeUnit === 'gal' ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-white dark:bg-zinc-950 text-slate-500 dark:text-gray-400 hover:bg-slate-50'}`}>Gallons</button>
-          <button onClick={() => handleResultVolumeUnitChange('L')} className={`px-4 py-1.5 text-xs font-bold transition-colors ${resultVolumeUnit === 'L' ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-white dark:bg-zinc-950 text-slate-500 dark:text-gray-400 hover:bg-slate-50'}`}>Litres</button>
+          <button onClick={() => handleResultVolumeUnitChange('gal')} className={`px-4 py-1.5 text-xs font-bold transition-colors ${resultVolumeUnit === 'gal' ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-white dark:bg-zinc-950 text-slate-500 dark:text-gray-400 hover:bg-slate-50'}`} aria-pressed={resultVolumeUnit === 'gal'}>Gallons</button>
+          <button onClick={() => handleResultVolumeUnitChange('L')} className={`px-4 py-1.5 text-xs font-bold transition-colors ${resultVolumeUnit === 'L' ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-white dark:bg-zinc-950 text-slate-500 dark:text-gray-400 hover:bg-slate-50'}`} aria-pressed={resultVolumeUnit === 'L'}>Litres</button>
         </div>
       </div>
       <div className="space-y-5">
@@ -724,7 +762,7 @@ const BlendPane = ({ precisionMode, setPrecisionMode, pumpOctane, setPumpOctane,
       )}
     </div>
 
-    <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-white/5 rounded-2xl p-6 shadow-sm dark:shadow-none flex flex-col">
+    <div className="surface-card p-6 flex flex-col">
       <h2 className="text-base font-bold text-slate-900 dark:text-gray-100 mb-6 border-b border-slate-100 dark:border-white/5 pb-4">Blend Result</h2>
       {result ? (
         <div className="space-y-5">
@@ -748,7 +786,7 @@ const BlendPane = ({ precisionMode, setPrecisionMode, pumpOctane, setPumpOctane,
 
 const RefuelPane = ({ volumeLabel, formData, toDisplayVolume, handleChange, refuelGallons, setRefuelGallons, refuelAddLabel, refuelAddUnit, handleRefuelAddUnitChange, toDisplayRefuelVolume, fromDisplayRefuelVolume, refuelPumpEthanol, setRefuelPumpEthanol, calcRefuel, refuelResult }) => (
   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-    <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-white/5 rounded-2xl p-6 shadow-sm dark:shadow-none">
+    <div className="surface-card p-6">
       <h2 className="text-base font-bold text-slate-900 dark:text-gray-100 mb-4 border-b border-slate-100 dark:border-white/5 pb-4">Refuel Planner</h2>
       <p className="text-sm text-slate-500 dark:text-gray-400 mb-6">"I'm adding X gallons at the pump — what will my blend be?"</p>
       <div className="space-y-5">
@@ -762,6 +800,7 @@ const RefuelPane = ({ volumeLabel, formData, toDisplayVolume, handleChange, refu
                 type="button"
                 onClick={() => handleRefuelAddUnitChange('gal')}
                 className={`px-3 py-1 text-[11px] font-bold transition-colors ${refuelAddUnit === 'gal' ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-white dark:bg-zinc-950 text-slate-500 dark:text-gray-400 hover:bg-slate-50'}`}
+                aria-pressed={refuelAddUnit === 'gal'}
               >
                 Gallons
               </button>
@@ -769,6 +808,7 @@ const RefuelPane = ({ volumeLabel, formData, toDisplayVolume, handleChange, refu
                 type="button"
                 onClick={() => handleRefuelAddUnitChange('L')}
                 className={`px-3 py-1 text-[11px] font-bold transition-colors ${refuelAddUnit === 'L' ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-white dark:bg-zinc-950 text-slate-500 dark:text-gray-400 hover:bg-slate-50'}`}
+                aria-pressed={refuelAddUnit === 'L'}
               >
                 Litres
               </button>
@@ -783,7 +823,7 @@ const RefuelPane = ({ volumeLabel, formData, toDisplayVolume, handleChange, refu
           <label className="block text-xs font-bold text-slate-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide">Pump Ethanol %</label>
           <div className="flex gap-2 flex-wrap">
             {[0, 10, 85].map(e => (
-              <button key={e} onClick={() => setRefuelPumpEthanol(e)} className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${refuelPumpEthanol === e ? 'bg-slate-900 dark:bg-brand-500 text-white border-transparent' : 'bg-white dark:bg-zinc-950 border-slate-200 dark:border-white/10 text-slate-500 dark:text-gray-400'}`}>E{e}</button>
+              <button key={e} onClick={() => setRefuelPumpEthanol(e)} className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${refuelPumpEthanol === e ? 'bg-slate-900 dark:bg-brand-500 text-white border-transparent' : 'bg-white dark:bg-zinc-950 border-slate-200 dark:border-white/10 text-slate-500 dark:text-gray-400'}`} aria-pressed={refuelPumpEthanol === e}>E{e}</button>
             ))}
             <input type="number" value={refuelPumpEthanol} onChange={e => setRefuelPumpEthanol(parseFloat(e.target.value) || 0)} min="0" max="85" step="5" className="w-20 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-white/10 focus:border-brand-400 rounded-xl px-3 py-1.5 text-slate-900 dark:text-gray-100 text-xs outline-none" placeholder="Custom" />
           </div>
@@ -792,7 +832,7 @@ const RefuelPane = ({ volumeLabel, formData, toDisplayVolume, handleChange, refu
       <button onClick={calcRefuel} className="w-full mt-8 bg-slate-900 dark:bg-brand-500 hover:bg-slate-800 dark:hover:bg-brand-400 text-white py-3 rounded-xl font-bold tracking-wide transition-all flex justify-center items-center gap-2"><RotateCcw size={16} /> CALCULATE RESULT</button>
     </div>
 
-    <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-white/5 rounded-2xl p-6 shadow-sm dark:shadow-none flex flex-col">
+    <div className="surface-card p-6 flex flex-col">
       <h2 className="text-base font-bold text-slate-900 dark:text-gray-100 mb-6 border-b border-slate-100 dark:border-white/5 pb-4">Resulting Blend</h2>
       {refuelResult !== null ? (
         <div className="flex-1 flex flex-col items-center justify-center">
@@ -813,7 +853,7 @@ const RefuelPane = ({ volumeLabel, formData, toDisplayVolume, handleChange, refu
 const InputGroup = ({ label, name, value, onChange, step, helpText = null }) => (
   <div>
     <label className="block text-xs font-bold text-slate-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide">{label}</label>
-    <input type="number" name={name} value={value} onChange={onChange} step={step} className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-white/10 focus:border-brand-400 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-400/30 rounded-xl px-4 py-2.5 text-slate-900 dark:text-gray-100 text-sm outline-none transition-all placeholder-slate-300 dark:placeholder-gray-600" placeholder="0.0" />
+    <input type="number" name={name} value={value} onChange={onChange} step={step} className="app-input w-full px-4 py-2.5 text-sm" placeholder="0.0" />
     {helpText && <p className="mt-1.5 text-xs text-slate-500 dark:text-gray-400">{helpText}</p>}
   </div>
 );
@@ -827,6 +867,7 @@ const TankCapacityInput = ({ value, onChange, unit, onUnitChange, unitLabel, hel
           type="button"
           onClick={() => onUnitChange('gal')}
           className={`px-3 py-1 text-[11px] font-bold transition-colors ${unit === 'gal' ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-white dark:bg-zinc-950 text-slate-500 dark:text-gray-400 hover:bg-slate-50'}`}
+          aria-pressed={unit === 'gal'}
         >
           Gallons
         </button>
@@ -834,12 +875,13 @@ const TankCapacityInput = ({ value, onChange, unit, onUnitChange, unitLabel, hel
           type="button"
           onClick={() => onUnitChange('L')}
           className={`px-3 py-1 text-[11px] font-bold transition-colors ${unit === 'L' ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-white dark:bg-zinc-950 text-slate-500 dark:text-gray-400 hover:bg-slate-50'}`}
+          aria-pressed={unit === 'L'}
         >
           Litres
         </button>
       </div>
     </div>
-    <input type="number" name="tankSize" value={value} onChange={onChange} step="0.1" className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-white/10 focus:border-brand-400 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-400/30 rounded-xl px-4 py-2.5 text-slate-900 dark:text-gray-100 text-sm outline-none transition-all placeholder-slate-300 dark:placeholder-gray-600" placeholder="0.0" />
+    <input type="number" name="tankSize" value={value} onChange={onChange} step="0.1" className="app-input w-full px-4 py-2.5 text-sm" placeholder="0.0" />
     {helpText && <p className="mt-1.5 text-xs text-slate-500 dark:text-gray-400">{helpText}</p>}
   </div>
 );

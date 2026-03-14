@@ -10,6 +10,7 @@ import { saveRecentLog, saveGarageLog, getAnnotations, saveAnnotations } from '.
 import { trackEvent, trackError, trackUploadFailure, trackParserMismatch, trackPerformanceIssue, trackExportFailure } from '../utils/telemetry';
 import { hapticSuccess, hapticWarning, hapticError } from '../utils/haptics';
 import { mergeCompareChartData } from '../utils/logCompare';
+import { PageHeader } from '../components/ui';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Legend, ReferenceLine, ReferenceDot, ScatterChart, Scatter, ZAxis,
@@ -31,6 +32,31 @@ const COMPARE_CHANNELS = [
   { key: 'hpfpActual', label: 'HPFP Actual', yAxisId: 'hpfp', color: '#c084fc' },
   { key: 'hpfpTarget', label: 'HPFP Target', yAxisId: 'hpfp', color: '#e9d5ff', dashed: true },
 ];
+
+function AfrWarningDot(props) {
+  const { cx = 0, cy = 0, payload } = props;
+  if (!payload?.isLeanWarning) return <circle r={0} fill="none" />;
+  return (
+    <g>
+      <circle cx={cx} cy={cy} r={7} fill="#f43f5e" opacity={0.35} className="animate-ping" style={{ transformOrigin: `${cx}px ${cy}px` }} />
+      <circle cx={cx} cy={cy} r={3.5} fill="#f43f5e" stroke="#111113" strokeWidth={1.5} />
+    </g>
+  );
+}
+
+function BoostWarningDot(props) {
+  const { cx = 0, cy = 0, payload } = props;
+  if (payload?.isHpfpWarning) {
+    return (
+      <g>
+        <circle cx={cx} cy={cy} r={7} fill="#f97316" opacity={0.35} className="animate-ping" style={{ transformOrigin: `${cx}px ${cy}px` }} />
+        <circle cx={cx} cy={cy} r={3.5} fill="#f97316" stroke="#111113" strokeWidth={1.5} />
+      </g>
+    );
+  }
+  if (payload?.isTimingWarning) return <circle cx={cx} cy={cy} r={3.5} fill="#eab308" stroke="#111113" strokeWidth={1.5} />;
+  return <circle r={0} fill="none" />;
+}
 
 const LogAnalyzer = () => {
   const location = useLocation();
@@ -57,6 +83,14 @@ const LogAnalyzer = () => {
   const [annotationInput, setAnnotationInput] = useState('');
   const [pendingAnnotationTime, setPendingAnnotationTime] = useState(null);
   const [showAnnotationInput, setShowAnnotationInput] = useState(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (location.state?.analysis) {
@@ -64,7 +98,7 @@ const LogAnalyzer = () => {
       setAnalysis(a);
       setAnnotations(getAnnotations(a.filename + '_' + a.row_count));
     }
-  }, []);
+  }, [location.state]);
 
   useEffect(() => {
     if (typeof Worker === 'undefined') return;
@@ -78,13 +112,39 @@ const LogAnalyzer = () => {
     if (!worker) return Promise.resolve(analyzeLog(csvText, filename, details));
     const requestId = nextRequestIdRef.current++;
     return new Promise((resolve, reject) => {
+      let settled = false;
+      let timeoutId = null;
+
+      const cleanup = () => {
+        worker.removeEventListener('message', onMessage);
+        worker.removeEventListener('error', onError);
+        if (timeoutId !== null) window.clearTimeout(timeoutId);
+      };
+
       const onMessage = (event) => {
         if (event.data?.id !== requestId) return;
-        worker.removeEventListener('message', onMessage);
+        if (settled) return;
+        settled = true;
+        cleanup();
         if (event.data.ok) resolve(event.data.result);
         else reject(new Error(event.data.error || 'Failed to analyze log.'));
       };
+
+      const onError = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(new Error('The analysis worker stopped before it could finish parsing the log.'));
+      };
+
       worker.addEventListener('message', onMessage);
+      worker.addEventListener('error', onError);
+      timeoutId = window.setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(new Error('Log analysis timed out. Try a smaller file or re-run the upload.'));
+      }, 15000);
       worker.postMessage({ id: requestId, csvText, filename, carDetails: details });
     });
   };
@@ -127,6 +187,7 @@ const LogAnalyzer = () => {
       try {
         const csvText = await readFileAsText(file);
         const result = await analyzeViaWorker(csvText, file.name, carDetails);
+        if (!mountedRef.current) return;
         saveRecentLog(result);
         lastResult = result;
         importedCount += 1;
@@ -136,6 +197,7 @@ const LogAnalyzer = () => {
     }
 
     if (lastResult) {
+      if (!mountedRef.current) return;
       setAnalysis(lastResult);
       setAnnotations(getAnnotations(lastResult.filename + '_' + lastResult.row_count));
       trackEvent('log_analyzer_batch_upload_succeeded', { imported_count: importedCount, total_count: csvFiles.length });
@@ -163,6 +225,7 @@ const LogAnalyzer = () => {
     reader.onload = async (e) => {
       try {
         const result = await analyzeViaWorker(e.target.result, file.name, carDetails);
+        if (!mountedRef.current) return;
         if (isCompare) {
           setCompareAnalysis(result);
         } else {
@@ -198,17 +261,20 @@ const LogAnalyzer = () => {
           }
         }
       } catch (err) {
+        if (!mountedRef.current) return;
         if (!isCompare) {
           setError(err.message);
           trackUploadFailure(err, { source: 'log_analyzer', filename: file.name, elapsed_ms: Math.round(performance.now() - startedAt), is_compare: isCompare });
         }
       } finally {
+        if (!mountedRef.current) return;
         setter(false);
       }
     };
     reader.onerror = () => {
       const readError = reader.error || new Error('Failed to read file.');
       trackUploadFailure(readError, { source: 'file_reader', filename: file.name, is_compare: isCompare });
+      if (!mountedRef.current) return;
       if (isCompare) {
         setCompareLoading(false);
         return;
@@ -302,29 +368,6 @@ const LogAnalyzer = () => {
     return null;
   };
 
-  const AfrWarningDot = (props) => {
-    const { cx = 0, cy = 0, payload } = props;
-    if (!payload?.isLeanWarning) return <circle r={0} fill="none" />;
-    return (
-      <g>
-        <circle cx={cx} cy={cy} r={7} fill="#f43f5e" opacity={0.35} className="animate-ping" style={{ transformOrigin: `${cx}px ${cy}px` }} />
-        <circle cx={cx} cy={cy} r={3.5} fill="#f43f5e" stroke="#111113" strokeWidth={1.5} />
-      </g>
-    );
-  };
-
-  const BoostWarningDot = (props) => {
-    const { cx = 0, cy = 0, payload } = props;
-    if (payload?.isHpfpWarning) return (
-      <g>
-        <circle cx={cx} cy={cy} r={7} fill="#f97316" opacity={0.35} className="animate-ping" style={{ transformOrigin: `${cx}px ${cy}px` }} />
-        <circle cx={cx} cy={cy} r={3.5} fill="#f97316" stroke="#111113" strokeWidth={1.5} />
-      </g>
-    );
-    if (payload?.isTimingWarning) return <circle cx={cx} cy={cy} r={3.5} fill="#eab308" stroke="#111113" strokeWidth={1.5} />;
-    return <circle r={0} fill="none" />;
-  };
-
   const mergedChartData = React.useMemo(() => {
     if (!analysis || !compareAnalysis) return analysis?.chartData || [];
     const baseMap = {};
@@ -371,7 +414,12 @@ const LogAnalyzer = () => {
     const getValue = (obj, path) => path.reduce((acc, key) => acc?.[key], obj);
     const peakBoost = (obj) => {
       const vals = (obj?.chartData || []).map((pt) => Number(pt.boost)).filter((v) => Number.isFinite(v));
-      return vals.length ? Math.max(...vals) : null;
+      if (!vals.length) return null;
+      let peak = vals[0];
+      for (let i = 1; i < vals.length; i += 1) {
+        if (vals[i] > peak) peak = vals[i];
+      }
+      return peak;
     };
     return [
       ...fields.map((f) => {
@@ -403,64 +451,56 @@ const LogAnalyzer = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <header className="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-3">
-            <Activity className="text-brand-400" size={32} />
-            Log Analyzer
-            <span className="text-[10px] font-bold uppercase tracking-widest text-orange-600 dark:text-orange-400 bg-orange-100 dark:bg-orange-500/10 border border-orange-200 dark:border-orange-500/20 px-2 py-0.5 rounded-full ml-1">
-              Beta Models
-            </span>
-          </h1>
-          <p className="text-gray-400 dark:text-gray-400 mt-2">Upload BM3 or MHD CSV datalogs for instant health analysis.</p>
-          <div className="flex items-center gap-2 mt-3 text-sm text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-500/5 border border-orange-100 dark:border-orange-500/10 px-3 py-2 rounded-lg">
-            <AlertTriangle size={16} className="shrink-0" />
-            <p><strong>Heads up:</strong> Analysis models are currently being trained. Information provided may be inaccurate.</p>
-          </div>
-        </div>
-
-        {analysis && (
+      <PageHeader
+        eyebrow="Analysis"
+        title="Log Analyzer"
+        description="Upload BM3 or MHD CSV datalogs for instant health analysis, compare overlays, and guided diagnostics."
+        action={analysis ? (
           <div className="flex items-center gap-3 animate-fade-in flex-wrap">
             {analysis.logFormat && analysis.logFormat !== 'Unknown' && (
               <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${FORMAT_COLOR[analysis.logFormat] || FORMAT_COLOR.Unknown}`}>
                 {analysis.logFormat}
               </span>
             )}
-            <span className="text-xs font-medium text-gray-400 dark:text-gray-400 bg-white dark:bg-surface-200 border border-gray-200 dark:border-white/5 px-3 py-1.5 rounded-md">
+            <span className="app-pill px-3 py-1.5 text-xs font-medium">
               {analysis.carDetails?.engine || 'B58'} · E{analysis.carDetails?.ethanol ?? 10} · {analysis.carDetails?.tuneStage || 'Stage 1'}
             </span>
             <div className={`px-4 py-1.5 rounded-md border flex items-center gap-2 text-xs font-bold uppercase tracking-wider ${getStatusColor(analysis.status)}`}>
               {getStatusIcon(analysis.status)}{analysis.status}
             </div>
           </div>
-        )}
-      </header>
+        ) : null}
+      />
+      <div className="flex items-center gap-2 rounded-[1rem] border border-orange-200/70 bg-orange-50/85 px-3 py-2 text-sm text-orange-600 dark:border-orange-500/15 dark:bg-orange-500/6 dark:text-orange-400">
+        <AlertTriangle size={16} className="shrink-0" />
+        <p><strong>Heads up:</strong> Analysis models are currently being trained. Information provided may be inaccurate.</p>
+      </div>
 
       {!analysis && !loading && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-1 bg-white dark:bg-surface-200 border border-gray-200 dark:border-white/5 rounded-xl p-6 shadow-sm h-fit">
-            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-5">Vehicle Profile</h3>
+          <div className="surface-card h-fit p-5 md:p-6">
+            <h3 className="mb-5 text-xs font-bold uppercase tracking-wider app-muted">Vehicle Profile</h3>
             <div className="space-y-5">
               <div>
-                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Engine</label>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide app-muted">Engine</label>
                 <select value={carDetails.engine} onChange={e => setCarDetails(prev => ({ ...prev, engine: e.target.value }))}
-                  className="w-full bg-gray-50 dark:bg-surface-300 border border-gray-300 dark:border-white/10 focus:border-brand-500 rounded-lg px-3 py-2 text-gray-800 dark:text-gray-200 text-sm outline-none transition-colors">
+                  className="app-input w-full px-3 py-2 text-sm">
                   {ENGINE_OPTIONS.map(o => <option key={o}>{o}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Tune Stage</label>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide app-muted">Tune Stage</label>
                 <select value={carDetails.tuneStage} onChange={e => setCarDetails(prev => ({ ...prev, tuneStage: e.target.value }))}
-                  className="w-full bg-gray-50 dark:bg-surface-300 border border-gray-300 dark:border-white/10 focus:border-brand-500 rounded-lg px-3 py-2 text-gray-800 dark:text-gray-200 text-sm outline-none transition-colors">
+                  className="app-input w-full px-3 py-2 text-sm">
                   {TUNE_OPTIONS.map(o => <option key={o}>{o}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Fuel Mix</label>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide app-muted">Fuel Mix</label>
                 <div className="flex gap-2 flex-wrap">
                   {ETHANOL_OPTIONS.map(e => (
                     <button key={e} onClick={() => setCarDetails(prev => ({ ...prev, ethanol: e }))}
-                      className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${carDetails.ethanol === e ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-gray-50 dark:bg-surface-300 border border-gray-300 dark:border-white/10 text-gray-600 dark:text-gray-400 hover:border-brand-500/50'}`}
+                      className={`px-3 py-1.5 rounded-[0.85rem] text-xs font-bold transition-all ${carDetails.ethanol === e ? 'bg-slate-900 text-white dark:bg-brand-500' : 'app-button-secondary app-muted hover:border-brand-500/40'}`}
                     >E{e}</button>
                   ))}
                 </div>
@@ -482,27 +522,27 @@ const LogAnalyzer = () => {
               </div>
             )}
             <div
-              className={`border-2 border-dashed rounded-xl h-full min-h-[300px] flex flex-col items-center justify-center transition-colors relative overflow-hidden group ${dragActive ? 'border-brand-500 bg-brand-500/5' : 'border-gray-300 dark:border-white/10 bg-white dark:bg-surface-200 hover:border-gray-400 dark:hover:border-white/20'}`}
+              className={`surface-card-strong border-2 border-dashed h-full min-h-[300px] flex flex-col items-center justify-center transition-colors relative overflow-hidden group ${dragActive ? 'border-brand-500 bg-brand-500/5' : 'border-gray-300 dark:border-white/10 hover:border-gray-400 dark:hover:border-white/20'}`}
               onDragEnter={handleDrag} onDragLeave={handleDrag} onDragOver={handleDrag} onDrop={handleDrop}
             >
               <div className="absolute inset-0 bg-gradient-to-br from-brand-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
-              <div className="w-16 h-16 rounded-full bg-gray-50 dark:bg-surface-300 border border-gray-200 dark:border-white/5 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
-                <UploadCloud size={32} className={dragActive ? 'text-brand-400' : 'text-gray-400'} />
+              <div className="surface-inset mb-4 flex h-16 w-16 items-center justify-center rounded-full group-hover:scale-110 transition-transform duration-300">
+                <UploadCloud size={32} className={dragActive ? 'text-brand-400' : 'app-muted'} />
               </div>
-              <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200">Drag & Drop Datalog CSV</h3>
-              <p className="text-gray-400 mt-1 text-sm text-center max-w-sm">Supports MHD and bootmod3 exported CSV files.</p>
+              <h3 className="text-lg font-semibold app-heading">Drag & Drop Datalog CSV</h3>
+              <p className="mt-1 max-w-sm text-center text-sm app-muted">Supports MHD and bootmod3 exported CSV files.</p>
               <div className="mt-6 flex flex-col sm:flex-row items-center gap-2 relative z-10">
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 border border-gray-300 dark:border-white/10 text-gray-800 dark:text-gray-200 px-5 py-2 rounded-md text-sm font-medium transition-all"
+                  className="app-button-secondary px-5 py-2 text-sm font-medium"
                 >
                   Browse File
                 </button>
                 <button
                   type="button"
                   onClick={() => folderInputRef.current?.click()}
-                  className="bg-brand-50 dark:bg-brand-500/10 hover:bg-brand-100 dark:hover:bg-brand-500/20 border border-brand-200 dark:border-brand-500/20 text-brand-700 dark:text-brand-300 px-5 py-2 rounded-md text-sm font-medium transition-all"
+                  className="app-button-primary px-5 py-2 text-sm font-medium"
                 >
                   Import Folder
                 </button>
@@ -515,10 +555,10 @@ const LogAnalyzer = () => {
       )}
 
       {loading && (
-        <div className="bg-white dark:bg-surface-200 rounded-xl p-16 flex flex-col items-center justify-center border border-gray-200 dark:border-white/5 min-h-[400px]">
+        <div className="surface-card min-h-[400px] p-16 flex flex-col items-center justify-center">
           <div className="w-12 h-12 border-2 border-gray-300 dark:border-white/10 border-t-brand-400 rounded-full animate-spin" />
-          <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mt-6">Analyzing Telemetry...</h3>
-          <p className="text-gray-400 mt-1 text-sm">Checking AFR, HPFP targets, and timing corrections.</p>
+          <h3 className="mt-6 text-lg font-semibold app-heading">Analyzing Telemetry...</h3>
+          <p className="mt-1 text-sm app-muted">Checking AFR, HPFP targets, and timing corrections.</p>
         </div>
       )}
 
@@ -544,36 +584,36 @@ const LogAnalyzer = () => {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-1 flex flex-col gap-4">
               {analysis.diagnostics?.length > 0 && (
-                <div className="bg-white dark:bg-surface-200 border border-gray-200 dark:border-white/5 rounded-xl p-6 shadow-sm">
-                  <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2 mb-4 uppercase tracking-wide">
+                <div className="surface-card p-5 md:p-6">
+                  <h2 className="mb-4 flex items-center gap-2 text-sm font-bold uppercase tracking-wide app-heading">
                     <Info className="text-brand-400" size={18} /> Diagnostic Workflow
                   </h2>
                   <div className="space-y-3">
                     {analysis.diagnostics.map((card) => (
-                      <div key={card.id} className="border border-gray-200 dark:border-white/10 rounded-lg p-3.5 bg-gray-50/80 dark:bg-surface-300/50">
+                      <div key={card.id} className="app-soft-panel p-3.5">
                         <div className="flex items-start justify-between gap-2">
-                          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">{card.title}</h3>
+                          <h3 className="text-sm font-semibold app-heading">{card.title}</h3>
                           <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${getStatusColor(card.severity)}`}>
                             {card.severity}
                           </span>
                         </div>
-                        <p className="text-xs text-gray-600 dark:text-gray-300 mt-2 leading-relaxed">{card.evidence}</p>
+                        <p className="mt-2 text-xs leading-relaxed app-muted">{card.evidence}</p>
                         {card.likelyCauses?.length > 0 && (
                           <div className="mt-3">
-                            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Likely Causes</p>
+                            <p className="text-[11px] font-semibold uppercase tracking-wide app-muted">Likely Causes</p>
                             <ul className="mt-1 space-y-1">
                               {card.likelyCauses.map((cause, i) => (
-                                <li key={i} className="text-xs text-gray-700 dark:text-gray-300">• {cause}</li>
+                                <li key={i} className="text-xs app-heading">• {cause}</li>
                               ))}
                             </ul>
                           </div>
                         )}
                         {card.recommendedChecks?.length > 0 && (
                           <div className="mt-3">
-                            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Recommended Checks</p>
+                            <p className="text-[11px] font-semibold uppercase tracking-wide app-muted">Recommended Checks</p>
                             <ul className="mt-1 space-y-1">
                               {card.recommendedChecks.slice(0, 4).map((check, i) => (
-                                <li key={i} className="text-xs text-gray-700 dark:text-gray-300">• {check}</li>
+                                <li key={i} className="text-xs app-heading">• {check}</li>
                               ))}
                             </ul>
                           </div>
@@ -585,13 +625,13 @@ const LogAnalyzer = () => {
               )}
 
               {analysis.keyPoints?.length > 0 && (
-                <div className="bg-white dark:bg-surface-200 border border-gray-200 dark:border-white/5 rounded-xl p-6 shadow-sm">
-                  <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2 mb-5 uppercase tracking-wide">
+                <div className="surface-card p-5 md:p-6">
+                  <h2 className="mb-5 flex items-center gap-2 text-sm font-bold uppercase tracking-wide app-heading">
                     <Lightbulb className="text-brand-400" size={18} /> Key Insights
                   </h2>
                   <ul className="space-y-4">
                     {analysis.keyPoints.map((pt, i) => (
-                      <li key={i} className="flex items-start gap-3 text-sm text-gray-700 dark:text-gray-300">
+                      <li key={i} className="flex items-start gap-3 text-sm app-heading">
                         <span className="w-1.5 h-1.5 rounded-full bg-brand-400 mt-1.5 shrink-0 shadow-[0_0_8px_rgba(20,184,166,0.8)]" />
                         <span className="leading-relaxed">{pt}</span>
                       </li>
@@ -601,8 +641,8 @@ const LogAnalyzer = () => {
               )}
 
               {analysis.metrics.fuelTrims?.hasData && (
-                <div className="bg-white dark:bg-surface-200 border border-gray-200 dark:border-white/5 rounded-xl p-6 shadow-sm">
-                  <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2 mb-4 uppercase tracking-wide">
+                <div className="surface-card p-5 md:p-6">
+                  <h2 className="mb-4 flex items-center gap-2 text-sm font-bold uppercase tracking-wide app-heading">
                     <TrendingDown className="text-brand-400" size={18} /> Fuel Trims (LTFT+STFT)
                   </h2>
                   <div className="space-y-3">
@@ -612,13 +652,13 @@ const LogAnalyzer = () => {
                       if (val === null) return null;
                       return (
                         <div key={key} className="flex items-center justify-between gap-3">
-                          <span className="text-xs text-gray-500 dark:text-gray-400 font-medium w-16">{label}</span>
-                          <div className="flex-1 h-2 rounded-full bg-gray-100 dark:bg-zinc-800 overflow-hidden relative">
-                            <div className="absolute inset-y-0 left-1/2 w-px bg-gray-300 dark:bg-zinc-600" />
+                          <span className="w-16 text-xs font-medium app-muted">{label}</span>
+                          <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-[var(--app-card-inset)]">
+                            <div className="absolute inset-y-0 left-1/2 w-px bg-[var(--app-border-strong)]" />
                             <div className={`absolute inset-y-0 rounded-full ${val > 0 ? 'bg-yellow-400' : 'bg-blue-400'}`}
                               style={{ width: `${Math.min(Math.abs(val) * 5, 50)}%`, left: val > 0 ? '50%' : `${50 - Math.min(Math.abs(val) * 5, 50)}%` }} />
                           </div>
-                          <span className={`text-xs font-bold tabular-nums w-10 text-right ${status === 'Caution' ? 'text-yellow-400' : 'text-gray-700 dark:text-gray-200'}`}>
+                          <span className={`w-10 text-right text-xs font-bold tabular-nums ${status === 'Caution' ? 'text-yellow-400' : 'app-heading'}`}>
                             {val > 0 ? '+' : ''}{val}%
                           </span>
                         </div>
@@ -629,15 +669,15 @@ const LogAnalyzer = () => {
               )}
 
               {annotations.length > 0 && (
-                <div className="bg-white dark:bg-surface-200 border border-gray-200 dark:border-white/5 rounded-xl p-5 shadow-sm">
-                  <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2 mb-3 uppercase tracking-wide">
+                <div className="surface-card p-5 md:p-6">
+                  <h2 className="mb-3 flex items-center gap-2 text-sm font-bold uppercase tracking-wide app-heading">
                     <Tag size={16} className="text-brand-400" /> Annotations
                   </h2>
                   <ul className="space-y-2">
                     {annotations.map(a => (
-                      <li key={a.id} className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-300 group">
+                      <li key={a.id} className="group flex items-center justify-between text-xs app-muted">
                         <span><span className="font-mono text-brand-400 mr-2">t={a.time}s</span>{a.label}</span>
-                        <button onClick={() => removeAnnotation(a.id)} className="opacity-0 group-hover:opacity-100 text-red-400 ml-2">✕</button>
+                        <button onClick={() => removeAnnotation(a.id)} className="opacity-0 group-hover:opacity-100 text-red-400 ml-2" aria-label={`Remove annotation ${a.label}`}>✕</button>
                       </li>
                     ))}
                   </ul>
@@ -646,15 +686,20 @@ const LogAnalyzer = () => {
             </div>
 
             <div className="lg:col-span-2 space-y-4">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex gap-1 p-1 bg-gray-100 dark:bg-surface-300/50 rounded-lg">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="app-toggle-group">
                   {[
                     { id: 'telemetry', label: 'Telemetry', icon: BarChart2 },
                     { id: 'knock', label: 'Knock Map', icon: Cpu },
                     ...(analysis.metrics.fuelTrims?.hasData ? [{ id: 'fueltrims', label: 'Fuel Trims', icon: TrendingDown }] : []),
                   ].map(({ id, label, icon: Icon }) => (
-                    <button key={id} onClick={() => setActiveTab(id)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${activeTab === id ? 'bg-white dark:bg-surface-200 text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700'}`}
+                    <button
+                      key={id}
+                      onClick={() => setActiveTab(id)}
+                      className={activeTab === id
+                        ? 'app-toggle-option app-toggle-option-active flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold'
+                        : 'app-toggle-option flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold'}
+                      aria-pressed={activeTab === id}
                     >
                       <Icon size={13} />{label}
                     </button>
@@ -662,18 +707,22 @@ const LogAnalyzer = () => {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <button onClick={exportPng} className="flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-brand-400 border border-gray-200 dark:border-white/5 hover:border-brand-500/30 px-3 py-1.5 rounded-md transition-colors">
+                  <button onClick={exportPng} className="app-button-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium">
                     <Download size={13} /> PNG
                   </button>
                   <button onClick={() => setShowCompare(v => !v)}
-                    className={`flex items-center gap-1.5 text-xs font-medium border px-3 py-1.5 rounded-md transition-colors ${showCompare ? 'text-brand-400 border-brand-500/30 bg-brand-500/5' : 'text-gray-400 hover:text-brand-400 border-gray-200 dark:border-white/5'}`}>
+                    className={`flex items-center gap-1.5 text-xs font-medium border px-3 py-1.5 rounded-[1.15rem] transition-colors ${showCompare ? 'text-brand-400 border-brand-500/30 bg-brand-500/5' : 'app-button-secondary'}`}
+                    aria-pressed={showCompare}
+                  >
                     <GitCompare size={13} /> Compare
                   </button>
                   <button onClick={() => setShowAnnotationInput(v => !v)}
-                    className={`flex items-center gap-1.5 text-xs font-medium border px-3 py-1.5 rounded-md transition-colors ${showAnnotationInput ? 'text-brand-400 border-brand-500/30 bg-brand-500/5' : 'text-gray-400 hover:text-brand-400 border-gray-200 dark:border-white/5'}`}>
+                    className={`flex items-center gap-1.5 text-xs font-medium border px-3 py-1.5 rounded-[1.15rem] transition-colors ${showAnnotationInput ? 'text-brand-400 border-brand-500/30 bg-brand-500/5' : 'app-button-secondary'}`}
+                    aria-pressed={showAnnotationInput}
+                  >
                     <MessageSquarePlus size={13} /> Annotate
                   </button>
-                  <button onClick={reset} className="text-xs font-medium text-brand-400 hover:text-brand-300 bg-brand-500/10 hover:bg-brand-500/20 px-3 py-1.5 rounded-md transition-colors">
+                  <button onClick={reset} className="app-button-primary px-3 py-1.5 text-xs font-medium">
                     New Log
                   </button>
                 </div>
@@ -691,29 +740,30 @@ const LogAnalyzer = () => {
                       {compareAnalysis ? 'Change' : 'Browse'}
                       <input type="file" className="hidden" accept=".csv" onChange={(e) => { if (e.target.files?.[0]) processFile(e.target.files[0], true); }} />
                     </label>
-                    {compareAnalysis && <button onClick={() => setCompareAnalysis(null)} className="text-gray-400 hover:text-red-400 text-xs">✕</button>}
+                    {compareAnalysis && <button onClick={() => setCompareAnalysis(null)} className="text-gray-400 hover:text-red-400 text-xs" aria-label="Clear compare log">✕</button>}
                   </div>
 
                   {compareAnalysis && (
                     <>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                         {compareSummary.map((item) => (
-                          <div key={item.title} className="rounded-lg border border-brand-200/60 dark:border-brand-500/20 bg-white/70 dark:bg-surface-300/30 p-2">
-                            <p className="text-[10px] uppercase tracking-wide text-gray-400">{item.title}</p>
-                            <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">{item.value}</p>
-                            <p className="text-[11px] text-gray-500 dark:text-gray-400">{item.detail}</p>
+                          <div key={item.title} className="app-soft-panel p-2">
+                            <p className="text-[10px] uppercase tracking-wide app-muted">{item.title}</p>
+                            <p className="text-xs font-semibold app-heading">{item.value}</p>
+                            <p className="text-[11px] app-muted">{item.detail}</p>
                           </div>
                         ))}
                       </div>
 
                       <div>
-                        <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-1">Compare channels</p>
+                        <p className="mb-1 text-[10px] uppercase tracking-wide app-muted">Compare channels</p>
                         <div className="flex flex-wrap gap-2">
                           {COMPARE_CHANNELS.map((channel) => (
                             <button
                               key={channel.key}
                               onClick={() => setCompareChannels((prev) => ({ ...prev, [channel.key]: !prev[channel.key] }))}
                               className={`text-[11px] px-2 py-1 rounded-md border transition-colors ${compareChannels[channel.key] ? 'bg-white dark:bg-surface-300 text-gray-700 dark:text-gray-200 border-brand-300 dark:border-brand-500/30' : 'text-gray-400 border-gray-200 dark:border-white/10'}`}
+                              aria-pressed={Boolean(compareChannels[channel.key])}
                             >
                               {channel.label}
                             </button>
@@ -728,12 +778,12 @@ const LogAnalyzer = () => {
               {compareAnalysis && (
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
                   {deltaCards.map((card) => (
-                    <div key={card.title} className="bg-white dark:bg-surface-200 border border-gray-200 dark:border-white/5 rounded-lg p-3">
-                      <p className="text-[10px] uppercase tracking-wide text-gray-400">{card.title} Δ</p>
+                    <div key={card.title} className="surface-inset p-3">
+                      <p className="text-[10px] uppercase tracking-wide app-muted">{card.title} Δ</p>
                       <p className={`text-sm font-bold ${card.delta == null ? 'text-gray-400' : card.delta <= 0 ? 'text-green-500' : 'text-red-400'}`}>
                         {card.delta == null ? '—' : `${card.delta > 0 ? '+' : ''}${card.delta}${card.unit}`}
                       </p>
-                      <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                      <p className="text-[11px] app-muted">
                         {card.base == null ? 'No overlap' : `${card.base}${card.unit} → ${card.compare}${card.unit}`}
                       </p>
                     </div>
@@ -752,12 +802,12 @@ const LogAnalyzer = () => {
                   />
                   <button onClick={saveAnnotation} disabled={!annotationInput.trim() || pendingAnnotationTime === null}
                     className="text-xs font-bold text-brand-600 dark:text-brand-400 px-2 py-1 rounded-md bg-brand-100 dark:bg-brand-500/20 disabled:opacity-40 transition-colors">Save</button>
-                  <button onClick={() => { setShowAnnotationInput(false); setPendingAnnotationTime(null); setAnnotationInput(''); }} className="text-gray-400 text-xs">✕</button>
+                  <button onClick={() => { setShowAnnotationInput(false); setPendingAnnotationTime(null); setAnnotationInput(''); }} className="text-gray-400 text-xs" aria-label="Cancel annotation">✕</button>
                 </div>
               )}
 
               {activeTab === 'telemetry' && (
-                <div ref={chartRef} className="bg-white dark:bg-surface-200 border border-gray-200 dark:border-white/5 rounded-xl p-6 shadow-sm">
+                <div ref={chartRef} className="surface-card p-5 md:p-6">
                   {(analysis.metrics.afr.lean_events > 0 || analysis.metrics.hpfp.status !== 'Safe' || analysis.metrics.timingCorrections.status !== 'Safe') && (
                     <div className="flex flex-wrap gap-3 mb-3 text-[11px] font-medium">
                       {analysis.metrics.afr.lean_events > 0 && (
@@ -780,15 +830,15 @@ const LogAnalyzer = () => {
                     </div>
                   )}
 
-                  <div className="h-[350px] w-full bg-gray-50/50 dark:bg-surface-300/30 rounded-lg p-2 border border-gray-200 dark:border-white/5">
+                  <div className="h-[280px] w-full rounded-lg border border-gray-200 bg-gray-50/50 p-2 dark:border-white/5 dark:bg-surface-300/30 md:h-[350px] xl:h-[420px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={mergedChartData} margin={{ top: 10, right: 55, left: -20, bottom: 0 }} onClick={showAnnotationInput ? handleChartClick : undefined} onMouseMove={(state) => { if (state?.activeLabel != null) setHoverTime(state.activeLabel); }} onMouseLeave={() => setHoverTime(null)}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#27272A" vertical={false} />
-                        <XAxis dataKey="time" stroke="#71717A" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-                        <YAxis yAxisId="left" stroke="#71717A" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
-                        <YAxis yAxisId="boost" orientation="right" stroke="#71717A" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--app-chart-grid)" vertical={false} />
+                        <XAxis dataKey="time" stroke="var(--app-chart-axis)" tick={{ fontSize: 11, fill: 'var(--app-chart-axis-muted)' }} tickLine={false} axisLine={false} />
+                        <YAxis yAxisId="left" stroke="var(--app-chart-axis)" tick={{ fontSize: 11, fill: 'var(--app-chart-axis-muted)' }} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
+                        <YAxis yAxisId="boost" orientation="right" stroke="var(--app-chart-axis)" tick={{ fontSize: 11, fill: 'var(--app-chart-axis-muted)' }} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
                         <YAxis yAxisId="hpfp" orientation="right" stroke="#a855f7" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} domain={['auto', 'auto']} width={50} tickFormatter={v => `${(v/1000).toFixed(1)}k`} />
-                        <Tooltip contentStyle={{ backgroundColor: '#18181B', borderColor: '#27272A', color: '#F4F4F5', borderRadius: '8px', fontSize: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} itemStyle={{ color: '#F4F4F5' }} formatter={(value, name) => name.startsWith('HPFP') ? [`${value} psi`, name] : [value, name]} />
+                        <Tooltip contentStyle={{ backgroundColor: 'var(--app-card-elevated)', borderColor: 'var(--app-border)', color: 'var(--app-text)', borderRadius: '12px', fontSize: '12px', boxShadow: '0 10px 28px rgba(15,23,42,0.18)' }} itemStyle={{ color: 'var(--app-text)' }} formatter={(value, name) => name.startsWith('HPFP') ? [`${value} psi`, name] : [value, name]} />
                         <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
                         <Line yAxisId="left" type="monotone" dataKey="afrActual" stroke="#14b8a6" name="AFR Actual" strokeWidth={2} dot={AfrWarningDot} connectNulls={false} />
                         <Line yAxisId="left" type="monotone" dataKey="afrTarget" stroke="#f43f5e" name="AFR Target" strokeWidth={2} strokeDasharray="4 4" dot={false} connectNulls={false} />
@@ -800,7 +850,7 @@ const LogAnalyzer = () => {
                           <Line key={channel.key} yAxisId={channel.yAxisId} type="monotone" dataKey={`${channel.key}_b`} stroke={channel.color} name={`${channel.label} (${compareAnalysis.filename})`} strokeWidth={1.5} strokeDasharray={channel.dashed ? '6 3' : '4 2'} dot={false} connectNulls={false} />
                         ))}
 
-                        {hoverTime !== null && <ReferenceLine x={hoverTime} yAxisId="left" stroke="#94a3b8" strokeWidth={1} strokeDasharray="2 2" />}
+                        {hoverTime !== null && <ReferenceLine x={hoverTime} yAxisId="left" stroke="var(--app-chart-axis-muted)" strokeWidth={1} strokeDasharray="2 2" />}
 
                         {(() => {
                           const pt = analysis.chartData.find(p => p.isHpfpWarning);
@@ -825,17 +875,17 @@ const LogAnalyzer = () => {
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
-                  {showAnnotationInput && <p className="text-xs text-gray-400 mt-2 text-center">Click on the chart to pin an annotation to a timestamp.</p>}
+                  {showAnnotationInput && <p className="mt-2 text-center text-xs app-muted">Click on the chart to pin an annotation to a timestamp.</p>}
                 </div>
               )}
 
               {activeTab === 'knock' && (
-                <div className="bg-white dark:bg-surface-200 border border-gray-200 dark:border-white/5 rounded-xl p-6 shadow-sm">
+                <div className="surface-card p-5 md:p-6">
                   <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100 uppercase tracking-wide flex items-center gap-2">
+                    <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide app-heading">
                       <Cpu size={16} className="text-brand-400" /> Knock Event Map
                     </h2>
-                    <span className="text-xs text-gray-400">{analysis.knockScatter?.length ?? 0} events</span>
+                    <span className="text-xs app-muted">{analysis.knockScatter?.length ?? 0} events</span>
                   </div>
                   {analysis.knockScatter?.length > 0 ? (
                     <>
@@ -849,11 +899,11 @@ const LogAnalyzer = () => {
                       <div className="h-[320px]">
                         <ResponsiveContainer width="100%" height="100%">
                           <ScatterChart margin={{ top: 10, right: 20, left: -20, bottom: 20 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#27272A" />
-                            <XAxis type="number" dataKey="rpm" name="RPM" stroke="#71717A" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} domain={[500, 8000]} label={{ value: 'RPM', position: 'insideBottom', offset: -10, fill: '#71717A', fontSize: 11 }} />
-                            <YAxis type="number" dataKey="load" name="Load %" stroke="#71717A" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} domain={[0, 100]} label={{ value: 'Load %', angle: -90, position: 'insideLeft', fill: '#71717A', fontSize: 11 }} />
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--app-chart-grid)" />
+                            <XAxis type="number" dataKey="rpm" name="RPM" stroke="var(--app-chart-axis)" tick={{ fontSize: 11, fill: 'var(--app-chart-axis-muted)' }} tickLine={false} axisLine={false} domain={[500, 8000]} label={{ value: 'RPM', position: 'insideBottom', offset: -10, fill: 'var(--app-chart-axis)', fontSize: 11 }} />
+                            <YAxis type="number" dataKey="load" name="Load %" stroke="var(--app-chart-axis)" tick={{ fontSize: 11, fill: 'var(--app-chart-axis-muted)' }} tickLine={false} axisLine={false} domain={[0, 100]} label={{ value: 'Load %', angle: -90, position: 'insideLeft', fill: 'var(--app-chart-axis)', fontSize: 11 }} />
                             <ZAxis type="number" dataKey="pull" range={[40, 200]} />
-                            <Tooltip cursor={{ strokeDasharray: '3 3' }} contentStyle={{ backgroundColor: '#18181B', borderColor: '#27272A', color: '#F4F4F5', borderRadius: '8px', fontSize: '12px' }} formatter={(v, name) => [name === 'pull' ? `${v}°` : v, name === 'rpm' ? 'RPM' : name === 'load' ? 'Load %' : 'Timing Pull']} />
+                            <Tooltip cursor={{ strokeDasharray: '3 3' }} contentStyle={{ backgroundColor: 'var(--app-card-elevated)', borderColor: 'var(--app-border)', color: 'var(--app-text)', borderRadius: '12px', fontSize: '12px' }} formatter={(v, name) => [name === 'pull' ? `${v}°` : v, name === 'rpm' ? 'RPM' : name === 'load' ? 'Load %' : 'Timing Pull']} />
                             {['Minor', 'Caution', 'Risk'].map((sev, idx) => {
                               const colors = ['#eab308', '#f97316', '#f43f5e'];
                               const data = analysis.knockScatter.filter(p => p.severity === sev);
@@ -862,10 +912,10 @@ const LogAnalyzer = () => {
                           </ScatterChart>
                         </ResponsiveContainer>
                       </div>
-                      <p className="text-xs text-gray-400 mt-2 text-center">Each dot = one knock event. Dot size = magnitude. Cluster patterns identify problem load cells.</p>
+                      <p className="mt-2 text-center text-xs app-muted">Each dot = one knock event. Dot size = magnitude. Cluster patterns identify problem load cells.</p>
                     </>
                   ) : (
-                    <div className="h-48 flex flex-col items-center justify-center text-gray-400 gap-2">
+                    <div className="app-muted flex h-48 flex-col items-center justify-center gap-2">
                       <CheckCircle size={32} className="text-green-400 opacity-60" />
                       <p className="text-sm font-medium">No knock events detected</p>
                       <p className="text-xs">{analysis.detectedColumns.timingColumns?.length ? 'All timing corrections were within normal range.' : 'No timing correction columns found in this log.'}</p>
@@ -875,8 +925,8 @@ const LogAnalyzer = () => {
               )}
 
               {activeTab === 'fueltrims' && analysis.metrics.fuelTrims?.hasData && (
-                <div className="bg-white dark:bg-surface-200 border border-gray-200 dark:border-white/5 rounded-xl p-6 shadow-sm">
-                  <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100 uppercase tracking-wide flex items-center gap-2 mb-6">
+                <div className="surface-card p-5 md:p-6">
+                  <h2 className="mb-6 flex items-center gap-2 text-sm font-bold uppercase tracking-wide app-heading">
                     <TrendingDown size={16} className="text-brand-400" /> Fuel Trim Health by RPM Zone
                   </h2>
                   <div className="space-y-6">
@@ -893,8 +943,8 @@ const LogAnalyzer = () => {
                         <div key={key}>
                           <div className="flex justify-between items-center mb-1">
                             <div>
-                              <span className="text-sm font-bold text-gray-800 dark:text-gray-200">{label}</span>
-                              <span className="ml-2 text-xs text-gray-400">{sublabel}</span>
+                              <span className="text-sm font-bold app-heading">{label}</span>
+                              <span className="ml-2 text-xs app-muted">{sublabel}</span>
                             </div>
                             <span className={`text-sm font-bold tabular-nums ${status === 'Caution' ? 'text-yellow-400' : 'text-green-400'}`}>
                               {val > 0 ? '+' : ''}{val}%
@@ -905,7 +955,7 @@ const LogAnalyzer = () => {
                             <div className={`absolute inset-y-0 rounded-full ${val > 0 ? 'bg-yellow-400' : 'bg-blue-400'} ${status === 'Caution' ? 'opacity-100' : 'opacity-70'}`}
                               style={{ width: `${pct}%`, left: val > 0 ? '50%' : `${50 - pct}%` }} />
                           </div>
-                          <p className="text-xs text-gray-400">{desc}</p>
+                          <p className="text-xs app-muted">{desc}</p>
                           {status === 'Caution' && <p className="text-xs text-yellow-400 mt-1 font-medium">⚠ Deviation greater than 5% — check fueling calibration for this RPM zone.</p>}
                         </div>
                       );
@@ -952,16 +1002,16 @@ const MetricBox = ({ title, value, target, status }) => {
     if (s === 'Safe')    return 'bg-green-500/10 border-green-500/20';
     if (s === 'Caution') return 'bg-yellow-500/10 border-yellow-500/20';
     if (s === 'Risk')    return 'bg-red-500/10 border-red-500/20';
-    return 'bg-gray-50 dark:bg-surface-300 border-gray-200 dark:border-white/5';
+    return 'surface-inset';
   };
   return (
-    <div className="bg-white dark:bg-surface-200 border border-gray-200 dark:border-white/5 rounded-xl p-5 shadow-sm relative overflow-hidden">
+    <div className="surface-card relative overflow-hidden p-5">
       <div className="flex justify-between items-start mb-2 relative z-10">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">{title}</p>
+        <p className="text-xs font-semibold uppercase tracking-wide app-muted">{title}</p>
         <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${getStatusBgColor(status)} ${getStatusColor(status)}`}>{status}</span>
       </div>
-      <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 relative z-10">{value}</p>
-      <p className="text-xs text-gray-400 dark:text-gray-500 mt-1 relative z-10">{target}</p>
+      <p className="relative z-10 text-2xl font-bold app-heading">{value}</p>
+      <p className="relative z-10 mt-1 text-xs app-muted">{target}</p>
     </div>
   );
 };

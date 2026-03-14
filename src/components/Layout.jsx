@@ -1,182 +1,200 @@
-import { useState } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
-import {
-  Home,
-  Activity,
-  User,
-  Menu,
-  Search,
-  Droplet,
-  MonitorPlay,
-  Settings,
-  Archive,
-} from 'lucide-react';
-import { clsx } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+import { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import { Menu, Home, Activity, Droplet, MonitorPlay, Settings, Archive, MoonStar, SunMedium, X } from 'lucide-react';
+import AppShellRail from './AppShellRail';
+import { cn } from './ui';
+import { getActiveBlend, getRecentLogs, saveSetting } from '../utils/storage';
 
-function cn(...inputs) {
-  return twMerge(clsx(inputs));
-}
+const NAV_GROUPS = [
+  {
+    label: 'Overview',
+    items: [
+      { name: 'Dashboard', path: '/dashboard', icon: Home },
+      { name: 'Garage',    path: '/garage',    icon: Archive },
+    ],
+  },
+  {
+    label: 'Analysis',
+    items: [
+      { name: 'Log Viewer',   path: '/viewer',   icon: MonitorPlay },
+      { name: 'Log Analyzer', path: '/analyzer', icon: Activity, experimental: true },
+    ],
+  },
+  {
+    label: 'Fuel',
+    items: [
+      { name: 'Blend Calculator', path: '/calculator', icon: Droplet },
+    ],
+  },
+  {
+    label: 'System',
+    items: [
+      { name: 'Settings', path: '/settings', icon: Settings },
+    ],
+  },
+];
 
-const Layout = ({ children }) => {
+const SIDEBAR_STATE_KEY = 'ethos_sidebar_collapsed';
+
+export default function Layout({ children }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const location = useLocation();
+  const [isRailCollapsed, setIsRailCollapsed] = useState(
+    () => localStorage.getItem(SIDEBAR_STATE_KEY) === 'true',
+  );
+  const [isDark, setIsDark] = useState(
+    () => document.documentElement.classList.contains('dark'),
+  );
+  const [shellData, setShellData] = useState(() => ({
+    recentLog:   getRecentLogs()[0] || null,
+    activeBlend: getActiveBlend(),
+  }));
+  const location  = useLocation();
+  const isViewer  = location.pathname === '/viewer';
 
-  const navItems = [
-    { name: 'Dashboard', path: '/dashboard', icon: Home },
-    { name: 'Blend Calc', path: '/calculator', icon: Droplet },
-    { name: 'Log Viewer', path: '/viewer', icon: MonitorPlay },
-    { name: 'Log Analyzer', path: '/analyzer', icon: Activity, experimental: true },
-    { name: 'Garage', path: '/garage', icon: Archive },
-    { name: 'Settings', path: '/settings', icon: Settings },
-  ];
+  useEffect(() => {
+    localStorage.setItem(SIDEBAR_STATE_KEY, String(isRailCollapsed));
+  }, [isRailCollapsed]);
+
+  useEffect(() => {
+    setShellData({
+      recentLog:   getRecentLogs()[0] || null,
+      activeBlend: getActiveBlend(),
+    });
+    setIsDark(document.documentElement.classList.contains('dark'));
+  }, [location.pathname]);
+
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setIsDark(document.documentElement.classList.contains('dark'));
+    });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class'],
+    });
+    return () => observer.disconnect();
+  }, []);
+
+  const vehicle = useMemo(() => {
+    const { recentLog, activeBlend } = shellData;
+    const name =
+      recentLog?.engine && recentLog.engine !== '—'
+        ? recentLog.engine.includes('B58') ? 'BMW F30 340i' : recentLog.engine
+        : 'BMW F30 340i';
+    const tune  = recentLog?.tune && recentLog.tune !== '—' ? recentLog.tune : 'Stage 2+';
+    const blend = activeBlend?.resultingBlend ?? recentLog?.ethanol ?? 50;
+    return { name, subtitle: `${tune} E${blend}` };
+  }, [shellData]);
+
+  const toggleTheme = () => {
+    const nextDark = !document.documentElement.classList.contains('dark');
+    document.documentElement.classList.toggle('dark', nextDark);
+    saveSetting('theme', nextDark ? 'dark' : 'light');
+    setIsDark(nextDark);
+  };
 
   return (
-    <div className="h-dvh bg-gray-50 dark:bg-[#09090B] text-gray-900 dark:text-gray-100 flex flex-col md:flex-row overflow-hidden font-sans selection:bg-brand-500/20 selection:text-brand-700">
+    <div className="app-shell flex min-h-dvh overflow-hidden">
 
-      {/* ── Mobile layout (hidden on md+) ── */}
-      <div className="md:hidden flex flex-col flex-1 overflow-hidden">
+      {/* ── Desktop Sidebar ───────────────────────── */}
+      <aside
+        className={cn(
+          'app-rail relative hidden shrink-0 border-r transition-[width] duration-200 md:flex md:flex-col',
+          isRailCollapsed ? 'w-[60px]' : 'w-[200px]',
+        )}
+      >
+        {/* hairline right edge */}
+        <div className="absolute inset-y-0 right-0 w-px bg-white/[0.05]" />
 
-        {/* Mobile Header */}
-        <div
-          className="flex-shrink-0 flex items-center justify-between px-6 pb-4 border-b border-gray-200 dark:border-zinc-800"
-          style={{ paddingTop: 'max(1.5rem, env(safe-area-inset-top))' }}
-        >
-          <button
-            type="button"
-            aria-label={isMobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
-            className="flex flex-col gap-1.5 w-6 cursor-pointer"
-            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-          >
-            <div className="h-0.5 w-full bg-gray-900 dark:bg-white rounded-full"></div>
-            <div className="h-0.5 w-full bg-gray-900 dark:bg-white rounded-full"></div>
-            <div className="h-0.5 w-2/3 bg-gray-900 dark:bg-white rounded-full"></div>
-          </button>
+        <div className="flex-1 overflow-y-auto px-2.5 pb-4" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 1rem)' }}>
+          <AppShellRail
+            navItems={NAV_GROUPS}
+            collapsed={isRailCollapsed}
+            onToggleCollapse={() => setIsRailCollapsed((v) => !v)}
+            vehicle={vehicle}
+          />
+        </div>
+      </aside>
+
+      {/* ── Main Area ────────────────────────────── */}
+      <div className="flex min-w-0 flex-1 flex-col">
+
+        {/* Mobile top bar */}
+        <div className="app-rail border-b px-4 pb-3 md:hidden" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 0.75rem)' }}>
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              aria-label={isMobileMenuOpen ? 'Close navigation' : 'Open navigation'}
+              className="app-icon-button flex h-9 w-9 items-center justify-center"
+              onClick={() => setIsMobileMenuOpen((v) => !v)}
+            >
+              {isMobileMenuOpen ? <X size={15} /> : <Menu size={15} />}
+            </button>
+
+            <span className="text-sm font-semibold tracking-tight text-white/90">
+              ETHOS<span className="text-brand-400">58</span>
+            </span>
+
+            <button
+              type="button"
+              aria-label={isDark ? 'Light theme' : 'Dark theme'}
+              className="app-icon-button flex h-9 w-9 items-center justify-center"
+              onClick={toggleTheme}
+            >
+              {isDark ? <SunMedium size={14} /> : <MoonStar size={14} />}
+            </button>
+          </div>
+
+          {isMobileMenuOpen && (
+            <div className="mt-3 rounded-lg border border-white/[0.06] bg-white/[0.03] p-2.5 animate-fade-in">
+              <AppShellRail
+                navItems={NAV_GROUPS}
+                mobile
+                onNavigate={() => setIsMobileMenuOpen(false)}
+                vehicle={vehicle}
+              />
+            </div>
+          )}
         </div>
 
-        {/* Mobile Nav (shown below header when open) */}
-        {isMobileMenuOpen && (
-          <nav
-            className="flex-shrink-0 flex flex-col px-6 py-4 border-b border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-[#09090B] gap-1.5"
-            style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
-          >
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              return (
-                <NavLink
-                  key={item.path}
-                  to={item.path}
-                  onClick={() => setIsMobileMenuOpen(false)}
-                  className={({ isActive }) => cn(
-                    "flex items-center gap-3 px-3 py-2 rounded-md transition-colors text-sm font-medium",
-                    isActive
-                      ? "bg-gray-100 dark:bg-zinc-800/80 text-gray-900 dark:text-white"
-                      : "text-gray-600 dark:text-zinc-400 hover:bg-gray-100 dark:hover:bg-zinc-800/50 hover:text-gray-900 dark:hover:text-white"
-                  )}
-                >
-                  {({ isActive }) => (
-                    <>
-                      <Icon size={18} strokeWidth={isActive ? 2 : 1.5} className={isActive ? "text-gray-900 dark:text-white" : "text-gray-500 dark:text-zinc-400"} />
-                      <span className="flex items-center gap-2">
-                        {item.name}
-                        {item.experimental && (
-                          <span className="text-[10px] uppercase font-bold bg-brand-50/50 dark:bg-brand-500/10 text-brand-600 dark:text-brand-400 px-1.5 py-0.5 rounded border border-brand-200 dark:border-brand-500/20 leading-none">
-                            Beta
-                          </span>
-                        )}
-                      </span>
-                    </>
-                  )}
-                </NavLink>
-              );
-            })}
-          </nav>
-        )}
+        {/* Canvas */}
+        <main className="app-canvas relative flex min-h-0 flex-1 overflow-hidden">
+          <div className="relative flex min-h-0 flex-1 flex-col">
 
-        {/* Mobile Page Content */}
-        <main
-          className="flex-1 overflow-y-auto"
-          data-scroll-container
-          style={{ paddingBottom: 'var(--app-bottom-inset, env(safe-area-inset-bottom))' }}
-        >
-          <div className={cn(
-            location.pathname === '/viewer' ? "p-0 h-full" : "px-4 pt-6 pb-12 max-w-6xl mx-auto"
-          )}>
-            {children}
+            {/* Desktop top-right controls */}
+            <div className="hidden items-center justify-end gap-2 px-6 md:flex xl:px-7" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 1rem)' }}>
+              <button
+                type="button"
+                aria-label={isDark ? 'Light theme' : 'Dark theme'}
+                className="app-icon-button flex h-8 w-8 items-center justify-center"
+                onClick={toggleTheme}
+              >
+                {isDark ? <SunMedium size={14} /> : <MoonStar size={14} />}
+              </button>
+            </div>
+
+            <div
+              className={cn(
+                'flex-1 overflow-y-auto',
+                isViewer ? 'p-0' : 'px-5 pb-10 pt-4 md:px-6 md:pb-10 xl:px-8',
+              )}
+              data-scroll-container
+              style={{
+                paddingBottom: 'var(--app-bottom-inset, env(safe-area-inset-bottom))',
+                overscrollBehaviorY: 'none',
+                WebkitOverflowScrolling: 'touch',
+              }}
+            >
+              {isViewer ? (
+                children
+              ) : (
+                <div className="app-workspace mx-auto h-full max-w-[1560px] animate-fade-in">
+                  {children}
+                </div>
+              )}
+            </div>
           </div>
         </main>
       </div>
-
-      {/* ── Desktop layout (hidden on mobile) ── */}
-      <nav className="hidden md:flex flex-shrink-0 flex-col h-screen w-[260px] p-6 lg:p-8 bg-white dark:bg-[#09090B] border-r border-gray-200 dark:border-zinc-800">
-        {/* Sidebar Logo */}
-        <div className="mb-10 mt-2 px-2">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-brand-500 flex items-center justify-center text-white shadow-sm shadow-brand-500/20">
-              <Activity size={18} strokeWidth={2.5} />
-            </div>
-            <span className="font-bold tracking-tight text-lg text-gray-900 dark:text-white flex-shrink-0 whitespace-nowrap">
-              ETHOS<span className="text-brand-500">58</span>
-            </span>
-          </div>
-        </div>
-
-        {/* Desktop Nav Links */}
-        <div className="flex-1 flex flex-col gap-1.5">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <NavLink
-                key={item.path}
-                to={item.path}
-                className={({ isActive }) => cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-md transition-colors text-sm font-medium",
-                  isActive
-                    ? "bg-gray-100 dark:bg-zinc-800/80 text-gray-900 dark:text-white"
-                    : "text-gray-600 dark:text-zinc-400 hover:bg-gray-100 dark:hover:bg-zinc-800/50 hover:text-gray-900 dark:hover:text-white"
-                )}
-              >
-                {({ isActive }) => (
-                  <>
-                    <Icon size={18} strokeWidth={isActive ? 2 : 1.5} className={isActive ? "text-gray-900 dark:text-white" : "text-gray-500 dark:text-zinc-400"} />
-                    <span className="flex items-center gap-2">
-                      {item.name}
-                      {item.experimental && (
-                        <span className="text-[10px] uppercase font-bold bg-brand-50/50 dark:bg-brand-500/10 text-brand-600 dark:text-brand-400 px-1.5 py-0.5 rounded border border-brand-200 dark:border-brand-500/20 leading-none">
-                          Beta
-                        </span>
-                      )}
-                    </span>
-                  </>
-                )}
-              </NavLink>
-            );
-          })}
-        </div>
-      </nav>
-
-      {/* Desktop Main Content */}
-      <main className="hidden md:flex flex-1 flex-col overflow-hidden relative bg-gray-50 dark:bg-[#09090B]">
-        <div className={cn("absolute top-6 right-8 z-10 flex", location.pathname === '/viewer' && "!hidden")}>
-          <div className="w-8 h-8 rounded-md border border-gray-200 dark:border-zinc-800 bg-white dark:bg-[#121214] flex items-center justify-center text-gray-500 dark:text-zinc-400 hover:text-gray-900 dark:hover:text-white hover:border-gray-300 dark:hover:border-zinc-700 transition-colors cursor-pointer shadow-sm">
-            <Search size={16} strokeWidth={2} />
-          </div>
-        </div>
-
-        <div className={cn(
-          "flex-1 overflow-y-auto",
-          location.pathname === '/viewer' ? "p-0" : "px-8 lg:px-12 pt-16 pb-12"
-        )} data-scroll-container>
-          <div className={cn(
-            "mx-auto animate-fade-in h-full",
-            location.pathname === '/viewer' ? "max-w-none" : "max-w-6xl"
-          )}>
-            {children}
-          </div>
-        </div>
-      </main>
     </div>
   );
-};
-
-export default Layout;
+}

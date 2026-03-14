@@ -2,18 +2,20 @@ import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import Layout from './components/Layout';
-import Calculator from './pages/Calculator';
-import Dashboard from './pages/Dashboard';
 import Settings from './pages/Settings';
 import { isOnboardingDone, getLastSeenVersion } from './utils/storage';
 import { CURRENT_VERSION } from './constants/version';
 
+const loadCalculator = () => import('./pages/Calculator');
+const loadDashboard = () => import('./pages/Dashboard');
 const loadLogAnalyzer = () => import('./pages/LogAnalyzer');
 const loadLogViewer = () => import('./pages/LogViewer');
 const loadOnboarding = () => import('./components/Onboarding');
 const loadChangelog = () => import('./components/Changelog');
 const loadGarage = () => import('./pages/Garage');
 
+const Calculator = lazy(loadCalculator);
+const Dashboard = lazy(loadDashboard);
 const LogAnalyzer = lazy(loadLogAnalyzer);
 const LogViewer = lazy(loadLogViewer);
 const Onboarding = lazy(loadOnboarding);
@@ -22,8 +24,8 @@ const Garage = lazy(loadGarage);
 
 function LoadingFallback() {
   return (
-    <div className="h-full min-h-[240px] flex items-center justify-center text-sm font-medium text-gray-500 dark:text-zinc-400">
-      Loading...
+    <div className="surface-card mx-auto flex min-h-[240px] max-w-md items-center justify-center text-sm font-medium app-muted">
+      Loading…
     </div>
   );
 }
@@ -40,6 +42,8 @@ function App() {
 
     const preloadHeavyViews = () => {
       if (cancelled) return;
+      void loadDashboard();
+      void loadCalculator();
       void loadLogViewer();
       void loadLogAnalyzer();
       void loadOnboarding();
@@ -242,7 +246,7 @@ function App() {
     <Router>
       {isOffline && (
         <div
-          className="fixed left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-xl bg-red-500/95 text-white text-xs font-semibold shadow-lg backdrop-blur-sm"
+          className="fixed left-1/2 -translate-x-1/2 z-[60] rounded-full px-4 py-2 bg-red-500/95 text-white text-xs font-semibold shadow-lg backdrop-blur-sm"
           style={{ top: 'max(0.5rem, env(safe-area-inset-top))' }}
         >
           You are offline. Some features may be unavailable.
