@@ -168,7 +168,7 @@ const Garage = () => {
         ))}
         {!filtered.length && (
           <SurfaceCard className="border-dashed text-center py-10">
-            <p className="text-sm app-muted">No garage logs found.</p>
+            <p className="text-sm app-muted">No archived logs found.</p>
           </SurfaceCard>
         )}
       </div>
