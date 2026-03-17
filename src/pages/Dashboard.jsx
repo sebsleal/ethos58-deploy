@@ -2864,19 +2864,20 @@ function CompareWorkspace({ garageLogs }) {
 
   const formatMetricLocal = (v, suffix = '', d = 1) => (Number.isFinite(Number(v)) ? `${Number(v).toFixed(d)}${suffix}` : '—');
 
-  const metricDiff = (a, b) => {
+  const metricDiff = (a, b, lowerIsBetter = false) => {
     if (!Number.isFinite(Number(a)) || !Number.isFinite(Number(b))) return null;
     const diff = Number(b) - Number(a);
-    return { diff, positive: diff > 0, label: `${diff > 0 ? '+' : ''}${diff.toFixed(1)}` };
+    const good = lowerIsBetter ? diff < 0 : diff > 0;
+    return { diff, good, label: `${diff > 0 ? '+' : ''}${diff.toFixed(1)}` };
   };
 
   const metrics = leftResult && rightResult ? [
     { label: 'Status', left: leftResult.status, right: rightResult.status },
     { label: 'AFR', left: formatMetricLocal(leftResult.metrics?.afr?.actual, ':1', 2), right: formatMetricLocal(rightResult.metrics?.afr?.actual, ':1', 2) },
-    { label: 'HPFP drop', left: formatMetricLocal(leftResult.metrics?.hpfp?.max_drop_pct, '%'), right: formatMetricLocal(rightResult.metrics?.hpfp?.max_drop_pct, '%'), diff: metricDiff(leftResult.metrics?.hpfp?.max_drop_pct, rightResult.metrics?.hpfp?.max_drop_pct) },
-    { label: 'IAT peak', left: formatMetricLocal(leftResult.metrics?.iat?.peak_f, 'F', 0), right: formatMetricLocal(rightResult.metrics?.iat?.peak_f, 'F', 0) },
-    { label: 'Timing pull', left: formatMetricLocal(leftResult.metrics?.timingCorrections?.max_correction, ' deg'), right: formatMetricLocal(rightResult.metrics?.timingCorrections?.max_correction, ' deg'), diff: metricDiff(leftResult.metrics?.timingCorrections?.max_correction, rightResult.metrics?.timingCorrections?.max_correction) },
-    { label: 'Health score', left: formatMetricLocal(leftResult.healthScore, '%', 0), right: formatMetricLocal(rightResult.healthScore, '%', 0), diff: metricDiff(leftResult.healthScore, rightResult.healthScore) },
+    { label: 'HPFP drop', left: formatMetricLocal(leftResult.metrics?.hpfp?.max_drop_pct, '%'), right: formatMetricLocal(rightResult.metrics?.hpfp?.max_drop_pct, '%'), diff: metricDiff(leftResult.metrics?.hpfp?.max_drop_pct, rightResult.metrics?.hpfp?.max_drop_pct, true) },
+    { label: 'IAT peak', left: formatMetricLocal(leftResult.metrics?.iat?.peak_f, 'F', 0), right: formatMetricLocal(rightResult.metrics?.iat?.peak_f, 'F', 0), diff: metricDiff(leftResult.metrics?.iat?.peak_f, rightResult.metrics?.iat?.peak_f, true) },
+    { label: 'Timing pull', left: formatMetricLocal(leftResult.metrics?.timingCorrections?.max_correction, ' deg'), right: formatMetricLocal(rightResult.metrics?.timingCorrections?.max_correction, ' deg'), diff: metricDiff(leftResult.metrics?.timingCorrections?.max_correction, rightResult.metrics?.timingCorrections?.max_correction, true) },
+    { label: 'Health score', left: formatMetricLocal(leftResult.healthScore, '%', 0), right: formatMetricLocal(rightResult.healthScore, '%', 0), diff: metricDiff(leftResult.healthScore, rightResult.healthScore, false) },
   ] : [];
 
   return (
@@ -2936,7 +2937,7 @@ function CompareWorkspace({ garageLogs }) {
                         <td className="py-2.5 px-4 text-right font-mono text-[var(--text-primary)]">{m.right}</td>
                         <td className="py-2.5 pl-4 text-right font-mono">
                           {m.diff ? (
-                            <span className={m.diff.diff > 0 ? 'text-[var(--success-text)]' : 'text-[var(--danger-text)]'}>
+                            <span className={m.diff.good ? 'text-[var(--success-text)]' : 'text-[var(--danger-text)]'}>
                               {m.diff.label}
                             </span>
                           ) : '—'}
