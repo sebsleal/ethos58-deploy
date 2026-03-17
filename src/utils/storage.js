@@ -17,6 +17,10 @@ const KEYS = {
   ONBOARDING_DONE:  'ethos_onboarding_done',
   STATION_PRESETS:  'ethos_station_presets',
   FUEL_PLANNER:     'ethos_fuel_planner',
+  BLEND_HISTORY:    'ethos_blend_history',
+  PENDING_BLEND:    'ethos_pending_blend',
+  CAR_PROFILES:     'ethos_car_profiles',
+  ACTIVE_CAR:       'ethos_active_car',
 };
 
 const MAX_RECENT_LOGS = 10;
@@ -250,6 +254,15 @@ export function getActiveBlend() {
 export function saveActiveBlend(result) {
   const entry = { ...result, date: new Date().toISOString() };
   localStorage.setItem(KEYS.ACTIVE_BLEND, JSON.stringify(entry));
+  // Also track in blend history
+  saveBlendHistory({
+    e85Gallons: result.e85Gallons,
+    pumpGallons: result.pumpGallons,
+    resultingBlend: result.resultingBlend,
+    resultingOctane: result.resultingOctane,
+    pumpOctane: result.pumpOctane,
+    pumpEthanol: result.pumpEthanol,
+  });
   return entry;
 }
 
@@ -356,6 +369,84 @@ export function getFuelPlannerDefaults() {
 export function saveFuelPlannerDefaults(defaults) {
   const current = getFuelPlannerDefaults();
   localStorage.setItem(KEYS.FUEL_PLANNER, JSON.stringify({ ...current, ...defaults }));
+}
+
+// ─── Blend History ───────────────────────────────────────────────────────────
+
+const MAX_BLEND_HISTORY = 50;
+
+export function getBlendHistory() {
+  try {
+    const entries = JSON.parse(localStorage.getItem(KEYS.BLEND_HISTORY) || '[]');
+    return Array.isArray(entries) ? entries : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveBlendHistory(entry) {
+  const history = getBlendHistory();
+  const next = [{ ...entry, date: new Date().toISOString(), id: Date.now() }, ...history].slice(0, MAX_BLEND_HISTORY);
+  localStorage.setItem(KEYS.BLEND_HISTORY, JSON.stringify(next));
+  return next;
+}
+
+export function clearBlendHistory() {
+  localStorage.removeItem(KEYS.BLEND_HISTORY);
+}
+
+// ─── Pending Blend (log-to-blend bridge) ─────────────────────────────────────
+
+export function getPendingBlend() {
+  try {
+    return JSON.parse(localStorage.getItem(KEYS.PENDING_BLEND) || 'null');
+  } catch {
+    return null;
+  }
+}
+
+export function setPendingBlend(data) {
+  localStorage.setItem(KEYS.PENDING_BLEND, JSON.stringify(data));
+}
+
+export function clearPendingBlend() {
+  localStorage.removeItem(KEYS.PENDING_BLEND);
+}
+
+// ─── Car Profiles ─────────────────────────────────────────────────────────────
+
+export function getCarProfiles() {
+  try {
+    const profiles = JSON.parse(localStorage.getItem(KEYS.CAR_PROFILES) || '[]');
+    return Array.isArray(profiles) ? profiles : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveCarProfile(profile) {
+  const list = getCarProfiles();
+  const entry = { ...profile, id: profile.id || Date.now().toString(), createdAt: profile.createdAt || new Date().toISOString() };
+  // Avoid duplicates — update if same id
+  const idx = list.findIndex((p) => p.id === entry.id);
+  const next = idx >= 0 ? list.map((p) => (p.id === entry.id ? entry : p)) : [entry, ...list];
+  localStorage.setItem(KEYS.CAR_PROFILES, JSON.stringify(next));
+  return entry;
+}
+
+export function deleteCarProfile(id) {
+  const list = getCarProfiles().filter((p) => p.id !== id);
+  localStorage.setItem(KEYS.CAR_PROFILES, JSON.stringify(list));
+  if (getActiveCar() === id) setActiveCar(null);
+}
+
+export function getActiveCar() {
+  return localStorage.getItem(KEYS.ACTIVE_CAR) || null;
+}
+
+export function setActiveCar(id) {
+  if (id) localStorage.setItem(KEYS.ACTIVE_CAR, id);
+  else localStorage.removeItem(KEYS.ACTIVE_CAR);
 }
 
 // ─── Annotations ─────────────────────────────────────────────────────────────
