@@ -1,5 +1,22 @@
 [
   {
+    "version": "2.6.0",
+    "date": "2026-03-17",
+    "title": "Toast Notifications + Bug Fixes + QOL",
+    "changes": [
+      { "type": "new", "platform": "both", "text": "Toast notification system is now live — every key action surfaces a feedback message: blend calculations, log analysis results, profile saves/deletes, garage exports, backup imports, and log deletions all confirm with a status-appropriate toast" },
+      { "type": "new", "platform": "both", "text": "Log analysis toasts reflect the actual result status — Safe logs show a success toast, Caution logs show a warning toast, and Risk logs show an error toast so the outcome is immediately visible without scrolling to the results" },
+      { "type": "new", "platform": "both", "text": "Blend history panel added to the standalone Calculator page alongside the existing Dashboard blend lab — history, clear-all, and per-entry date/volume display now work in both locations" },
+      { "type": "new", "platform": "both", "text": "Current fuel input in the Blend Calculator now has an independent gal/ltr unit toggle so you can enter your tank level in either unit without changing the rest of the calculator" },
+      { "type": "new", "platform": "both", "text": "Clear all garage logs action added to Settings so you can wipe the full archive in one step without deleting entries one by one" },
+      { "type": "improved", "platform": "both", "text": "Archive tab and sidebar navigation label updated from 'Garage archive' to 'Log archive' for clarity" },
+      { "type": "improved", "platform": "both", "text": "Log Viewer default downsampling mode changed to Original Data so charts render with full resolution on first open — existing users are migrated automatically" },
+      { "type": "improved", "platform": "both", "text": "Spacing added between the Clear Recent Logs and Clear Garage Logs buttons in Settings to prevent accidental taps" },
+      { "type": "fixed", "platform": "both", "text": "Compare Logs timing pull delta now colors correctly — the timing correction value is negative (e.g. -5.0°), so a less-negative right log correctly shows green and a more-negative one shows red. Previously the color was inverted." },
+      { "type": "fixed", "platform": "both", "text": "AFR histogram bars were all rendering grey regardless of target deviation — bars now correctly color green (within 0.25 of target), amber (moderate drift), and red (out of bounds)" }
+    ]
+  },
+  {
     "version": "2.5.0",
     "date": "2026-03-17",
     "title": "Design Overhaul + Compare Logs + Blend History",
