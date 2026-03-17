@@ -1,0 +1,237 @@
+[
+  {
+    "version": "2.6.0",
+    "date": "2026-03-17",
+    "title": "Toast Notifications + Bug Fixes + QOL",
+    "changes": [
+      { "type": "new", "platform": "both", "text": "Toast notification system is now live — every key action surfaces a feedback message: blend calculations, log analysis results, profile saves/deletes, garage exports, backup imports, and log deletions all confirm with a status-appropriate toast" },
+      { "type": "new", "platform": "both", "text": "Log analysis toasts reflect the actual result status — Safe logs show a success toast, Caution logs show a warning toast, and Risk logs show an error toast so the outcome is immediately visible without scrolling to the results" },
+      { "type": "new", "platform": "both", "text": "Blend history panel added to the standalone Calculator page alongside the existing Dashboard blend lab — history, clear-all, and per-entry date/volume display now work in both locations" },
+      { "type": "new", "platform": "both", "text": "Current fuel input in the Blend Calculator now has an independent gal/ltr unit toggle so you can enter your tank level in either unit without changing the rest of the calculator" },
+      { "type": "new", "platform": "both", "text": "Clear all garage logs action added to Settings so you can wipe the full archive in one step without deleting entries one by one" },
+      { "type": "improved", "platform": "both", "text": "Archive tab and sidebar navigation label updated from 'Garage archive' to 'Log archive' for clarity" },
+      { "type": "improved", "platform": "both", "text": "Log Viewer default downsampling mode changed to Original Data so charts render with full resolution on first open — existing users are migrated automatically" },
+      { "type": "new", "platform": "ios", "text": "Home screen widget support — after every blend calculation the widget tile updates with your current blend (e.g. E42 — 12.3 gal remaining) so you can check your mix without opening the app" },
+      { "type": "new", "platform": "ios", "text": "Siri Shortcut donation — each blend calculation donates an INShortcut so 'Hey Siri, check my blend' and similar prompts can open the app pre-loaded with your last result" },
+      { "type": "new", "platform": "ios", "text": "Spotlight search indexing — garage logs are indexed in CoreSpotlight after every archive sync, making them searchable by filename, engine, tune, tags, and ethanol content from iOS Search" },
+      { "type": "new", "platform": "ios", "text": "Live Activity for precision fills — when a precision-mode staged fill is started, a Live Activity launches on the Dynamic Island and lock screen showing fill steps and target blend in real time" },
+      { "type": "new", "platform": "ios", "text": "Keyboard dismiss on scroll — swiping or scrolling while a calculator field is focused now dismisses the keyboard automatically, matching standard iOS app behavior" },
+      { "type": "new", "platform": "ios", "text": "Auto-advance focus between calculator inputs — entering a two-digit ethanol percentage moves focus to the next field automatically, reducing the number of taps needed to complete a calculation" },
+      { "type": "improved", "platform": "both", "text": "Spacing added between the Clear Recent Logs and Clear Garage Logs buttons in Settings to prevent accidental taps" },
+      { "type": "fixed", "platform": "both", "text": "Compare Logs timing pull delta now colors correctly — the timing correction value is negative (e.g. -5.0°), so a less-negative right log correctly shows green and a more-negative one shows red. Previously the color was inverted." },
+      { "type": "fixed", "platform": "both", "text": "AFR histogram bars were all rendering grey regardless of target deviation — bars now correctly color green (within 0.25 of target), amber (moderate drift), and red (out of bounds)" }
+    ]
+  },
+  {
+    "version": "2.5.0",
+    "date": "2026-03-17",
+    "title": "Design Overhaul + Compare Logs + Blend History",
+    "changes": [
+      { "type": "new", "platform": "both", "text": "Compare Logs view: select any two garage logs to see a side-by-side metric delta table (AFR, HPFP, IAT, timing pull, health score) and an overlaid AFR/boost chart" },
+      { "type": "new", "platform": "both", "text": "Health Trend Chart: the static tune health gauge on the dashboard is replaced with a 14-log sparkline that shows health score trajectory and point delta across recent sessions" },
+      { "type": "new", "platform": "both", "text": "Car profile widgets now appear at the top of the dashboard kanban so your active car is always one click away without navigating to Settings" },
+      { "type": "new", "platform": "both", "text": "AFR distribution histogram in the Analyzer shows sample count per 0.25 AFR bucket, color-coded green (near target), amber (drift), and red (out of bounds)" },
+      { "type": "new", "platform": "both", "text": "Timing correction distribution histogram in the Analyzer shows how often each degree of pull was recorded, green for positive values, amber for mild pulls, red for hard pulls" },
+      { "type": "new", "platform": "both", "text": "Blend composition bar in the Blend Calculator: an animated stacked bar shows the E85-to-pump-gas ratio visually after every calculation" },
+      { "type": "new", "platform": "both", "text": "Blend history panel: every calculation is stored and viewable via the new History button in the Blend Calculator header, with date, volumes, and resulting blend" },
+      { "type": "new", "platform": "both", "text": "Log-to-blend integration: after analyzing a log, a 'Use Exx in blend lab' button appears in the Analyzer that pre-fills the current ethanol field in the Calculator and shows a confirmation banner" },
+      { "type": "improved", "platform": "both", "text": "Dark/light theme switching now crossfades over 150ms instead of flashing instantly" },
+      { "type": "improved", "platform": "both", "text": "Analyzer loading state replaced with a skeleton shimmer layout that mirrors the results structure, reducing perceived wait time" },
+      { "type": "improved", "platform": "both", "text": "Empty kanban columns now show contextual empty states with action buttons instead of generic placeholder text" },
+      { "type": "improved", "platform": "both", "text": "CSS token system expanded with spacing, border-radius, shadow, and transition-duration variables for consistent styling across the app" },
+      { "type": "improved", "platform": "both", "text": "Interactive card hover/active states and standardized focus ring and disabled styles added globally" },
+      { "type": "fixed", "platform": "both", "text": "Compare Logs delta column now colors correctly for lower-is-better metrics — HPFP drop, IAT peak, and timing pull show red when the value increases (worse) and green when it decreases (better)" }
+    ]
+  },
+  {
+    "version": "2.4.0",
+    "date": "2026-03-16",
+    "title": "Garage QOL + Active Car Pre-fill",
+    "changes": [
+      { "type": "new", "platform": "both", "text": "Set any saved car as 'Active' — the Analyzer dropdowns auto-populate with that car's engine, tune stage, and fuel blend on every upload" },
+      { "type": "new", "platform": "both", "text": "Each car card now has an 'Analyze' button that pre-fills the analyzer settings for that car and navigates directly to the Analyzer tab" },
+      { "type": "new", "platform": "both", "text": "Car cards show a log count and most recent health score pulled from the Archive, matching on engine, tune stage, and ethanol blend" },
+      { "type": "new", "platform": "both", "text": "Archive tab now shows car filter pills — click a saved car nickname to filter the log list to entries that match that car's specs" }
+    ]
+  },
+  {
+    "version": "2.3.0",
+    "date": "2026-03-16",
+    "title": "Ethos Redesign + Workspace Restore",
+    "changes": [
+      { "type": "new", "platform": "both", "text": "Full app redesign with a cleaner layout and updated visual style" },
+      { "type": "new", "platform": "both", "text": "Restored the core product workflows inside the redesigned shell: Log Analyzer, Log Viewer, Blend Lab, Garage archive, and Settings are now available again from the unified navigation" },
+      { "type": "new", "platform": "both", "text": "Analyzer uploads now run the existing safety-analysis pipeline again, including AFR/HPFP/IAT/timing diagnostics, key points, compare overlays, and saved session history" },
+      { "type": "new", "platform": "both", "text": "Viewer uploads are functional again with automatic channel detection, normalized multi-series charting, searchable channel selection, and brush-based telemetry review" },
+      { "type": "new", "platform": "both", "text": "Blend tools are fully wired back up, including active-blend saving, reverse refuel math, pump calibration, fill-cost estimates, multi-tank planning, saved profiles, and station presets" },
+      { "type": "new", "platform": "both", "text": "Garage archive management is live again with reopen-in-analyzer, reopen-in-viewer, editable tags and notes, CSV/JSON export, and JSON import support" },
+      { "type": "improved", "platform": "both", "text": "Settings now control the rebuilt interface directly, including live theme switching, unit preferences, and viewer rendering options carried through the new workspace shell" },
+      { "type": "fixed", "platform": "both", "text": "Synced the in-app version constant with the changelog so the Update Log surfaces the current release correctly" },
+      { "type": "fixed", "platform": "both", "text": "Patched the new theme system so saved light/dark preferences affect the redesigned interface visually instead of only persisting in storage" },
+      { "type": "improved", "platform": "both", "text": "Completed a verification pass after the rebuild: production build succeeds and the existing parser, compare, storage, and blend-math tests remain green" }
+    ]
+  },
+  {
+    "version": "2.2.0",
+    "date": "2026-03-13",
+    "title": "SaaS Redesign + iOS Status Bar & Haptics Fixes",
+    "changes": [
+      { "type": "new", "platform": "both", "text": "Full UI overhaul with Linear/Vercel-inspired dark theme: squared borders, teal accents, and a cleaner design system throughout" },
+      { "type": "new", "platform": "both", "text": "Redesigned sidebar with grouped navigation (Overview, Analysis, Fuel, System), collapsible 60px icon-only mode, and BETA badge on Log Analyzer" },
+      { "type": "fixed", "platform": "ios", "text": "Mobile header now sits below the status bar using env(safe-area-inset-top), so the hamburger menu no longer overlaps the clock" },
+      { "type": "fixed", "platform": "ios", "text": "Haptics import timeout added so a slow Capacitor plugin startup can no longer block the pull-to-refresh callback and leave the Refreshing banner stuck permanently" },
+      { "type": "fixed", "platform": "ios", "text": "Pull-to-refresh now has a 5-second safety timeout so the refresh indicator always clears even if the data fetch stalls" },
+      { "type": "improved", "platform": "both", "text": "Tune Health Score card redesigned with stacked ring-plus-label layout to avoid text truncation when breakdown data is present" }
+    ]
+  },
+  {
+    "version": "2.1.2",
+    "date": "2026-03-13",
+    "title": "Calculator Result Unit Controls",
+    "changes": [
+      { "type": "improved", "platform": "both", "text": "Fuel Planner output now includes its own gallons/litres result-unit toggle so cost and trip recommendations are easier to read in your preferred unit" },
+      { "type": "new", "platform": "both", "text": "Refuel Planner now lets you enter the amount being added in gallons or litres independently from the rest of the calculator" }
+    ]
+  },
+  {
+    "version": "2.1.1",
+    "date": "2026-03-13",
+    "title": "Fuel Planner Clarity + Tank Capacity Units",
+    "changes": [
+      { "type": "improved", "platform": "both", "text": "Fuel Planner now explains which inputs are required, which sections are optional, and what each planner field is used for" },
+      { "type": "improved", "platform": "both", "text": "Added a clearer planner summary so the output shows the current tank state, target blend, pump ethanol, and trip assumptions being used" },
+      { "type": "new", "platform": "both", "text": "Tank capacity can now be entered independently in gallons or litres without changing the rest of the calculator input units" }
+    ]
+  },
+  {
+    "version": "2.1.0",
+    "date": "2026-03-13",
+    "title": "Garage, Diagnostics, Fuel Planner + Telemetry",
+    "changes": [
+      { "type": "new", "platform": "both", "text": "Added Log Garage with backup export/import, richer history storage, and CSV reopen support" },
+      { "type": "improved", "platform": "both", "text": "Expanded Log Analyzer compare mode into a fuller comparison workflow for side-by-side review" },
+      { "type": "new", "platform": "both", "text": "Added batch log import and dashboard trend baselines for reviewing multiple sessions over time" },
+      { "type": "new", "platform": "both", "text": "Analyzer now surfaces diagnostic issue cards to highlight likely problem areas faster" },
+      { "type": "new", "platform": "both", "text": "Calculator now includes Fuel Planner tools like pump calibration, station presets, cost optimization, and trip planning" },
+      { "type": "improved", "platform": "both", "text": "Trimmed unfinished Settings sections and removed unused persisted options for a cleaner surface" },
+      { "type": "improved", "platform": "both", "text": "Added a more resilient telemetry pipeline with server-side ingest for client events and error reporting" },
+      { "type": "improved", "platform": "both", "text": "Expanded automated coverage for settings behavior, compare logic, and CSV viewer parsing" },
+      { "type": "fixed", "platform": "both", "text": "Removed duplicate Log Analyzer imports that could break builds after the feature merges" }
+    ]
+  },
+  {
+    "version": "2.0.6",
+    "date": "2026-03-13",
+    "title": "Dashboard Refresh Stability",
+    "changes": [
+      { "type": "fixed", "platform": "ios", "text": "Dashboard pull-to-refresh now stops cleanly instead of getting stuck showing the refresh banner" },
+      { "type": "fixed", "platform": "ios", "text": "Added stronger in-flight refresh guards so a single pull gesture cannot retrigger overlapping refresh cycles" },
+      { "type": "improved", "platform": "ios", "text": "Touch cancel handling now resets pull distance state correctly during interrupted refresh gestures" }
+    ]
+  },
+  {
+    "version": "2.0.5",
+    "date": "2026-03-13",
+    "title": "Status Bar Contrast + Smoother Tab Switching",
+    "changes": [
+      { "type": "fixed", "platform": "ios", "text": "Corrected status bar style mapping so light mode uses dark time/battery text and dark mode uses light text" },
+      { "type": "improved", "platform": "both", "text": "Switched to a hybrid loading strategy: core tabs load eagerly while heavier analysis pages stay lazy" },
+      { "type": "improved", "platform": "both", "text": "Added idle-time preloading for heavy route chunks to reduce first-switch lag between tabs/screens" },
+      { "type": "improved", "platform": "ios", "text": "Updated Capacitor StatusBar/Keyboard default style config to follow system appearance at startup" }
+    ]
+  },
+  {
+    "version": "2.0.4",
+    "date": "2026-03-13",
+    "title": "Input/Zoom Stability + Startup Performance",
+    "changes": [
+      { "type": "fixed", "platform": "ios", "text": "Prevented unwanted zoom while typing by enforcing iOS-safe form input sizing and tightening touch zoom handling behavior" },
+      { "type": "fixed", "platform": "both", "text": "Calculator numeric parsing now preserves valid 0 values instead of coercing them into blank fields" },
+      { "type": "fixed", "platform": "ios", "text": "Hardened native async listener setup/cleanup paths to avoid duplicate listeners during remounts" },
+      { "type": "improved", "platform": "both", "text": "Route screens and overlays now lazy-load to reduce initial bundle work and improve startup responsiveness" },
+      { "type": "fixed", "platform": "both", "text": "Mobile menu trigger is now a semantic button for better interaction reliability and accessibility" }
+    ]
+  },
+  {
+    "version": "2.0.3",
+    "date": "2026-03-13",
+    "title": "Blend Unit Flexibility + iOS Visual Fixes",
+    "changes": [
+      { "type": "new", "platform": "both", "text": "Blend Calculator now supports independent result units, so you can input tank values in litres but view fill amounts in gallons (or vice versa)" },
+      { "type": "fixed", "platform": "ios", "text": "Status bar style mapping corrected so light-theme iOS status text/icons render dark for better readability" },
+      { "type": "fixed", "platform": "ios", "text": "Onboarding modal now opens centered on iPhone instead of being anchored to the bottom edge" },
+      { "type": "fixed", "platform": "ios", "text": "Keyboard appearance and resize behavior improved to prevent the black overlay/gap effect while typing in calculator fields" },
+      { "type": "improved", "platform": "both", "text": "App shell now uses dynamic viewport sizing and explicit root background handling for cleaner mobile rendering" }
+    ]
+  },
+  {
+    "version": "2.0.2",
+    "date": "2026-03-13",
+    "title": "Native iOS UX + Platform Polish",
+    "changes": [
+      { "type": "fixed", "platform": "ios", "text": "Added full safe-area handling for top and bottom insets so mobile nav/content no longer overlap the home indicator" },
+      { "type": "improved", "platform": "ios", "text": "Status bar now syncs to light/dark theme and uses transparent overlay behavior" },
+      { "type": "fixed", "platform": "ios", "text": "Applied 16px form control font-size to prevent iOS input auto-zoom on focus" },
+      { "type": "new", "platform": "ios", "text": "PNG export now opens the native share sheet (Save Image, AirDrop, etc.) on iOS" },
+      { "type": "improved", "platform": "ios", "text": "Calculator now listens for keyboard events and scrolls active fields into view" },
+      { "type": "new", "platform": "ios", "text": "Dashboard now supports pull-to-refresh gesture with haptic feedback" },
+      { "type": "improved", "platform": "ios", "text": "Configured Capacitor splash screen and status bar plugin settings for branded launch behavior" },
+      { "type": "improved", "platform": "web", "text": "Enabled momentum/touch scrolling behavior for long scroll containers" },
+      { "type": "new", "platform": "both", "text": "Added offline-awareness banner using Capacitor Network (with web fallback)" },
+      { "type": "new", "platform": "ios", "text": "Onboarding and changelog modals now support drag-down-to-dismiss gesture" },
+      { "type": "new", "platform": "both", "text": "Update Log now includes platform filter tabs: All, Web, and iOS" }
+    ]
+  },
+  {
+    "version": "2.0.1",
+    "date": "2026-03-13",
+    "title": "HPFP Accuracy + Update Log Access",
+    "changes": [
+      { "type": "fixed", "platform": "both", "text": "HPFP crash detection now prioritizes high pedal/throttle demand and compares HPFP target vs actual more accurately" },
+      { "type": "fixed", "platform": "both", "text": "Tune health score now penalizes severe HPFP crashes correctly instead of showing inflated \"Good\" scores" },
+      { "type": "fixed", "platform": "both", "text": "BM3 vs MHD auto-detection improved for BM3 headers like bootmod3/(BM3), Pre-Throttle Boost, and HPFP Target variants" },
+      { "type": "improved", "platform": "both", "text": "Recent logs now recalculate health scores from saved analyses to avoid stale score values" },
+      { "type": "new", "platform": "both", "text": "New Settings > Update Log tab lets you open changelog history anytime after onboarding" }
+    ]
+  },
+  {
+    "version": "2.0.0",
+    "date": "2025-01-15",
+    "title": "Major Update",
+    "changes": [
+      { "type": "new", "platform": "both", "text": "Saved blend profiles — store and reload your favourite tank setups" },
+      { "type": "new", "platform": "both", "text": "Refuel Planner mode in the Calculator" },
+      { "type": "new", "platform": "both", "text": "Estimated octane output shown after every blend calculation" },
+      { "type": "new", "platform": "both", "text": "Knock event scatter chart — RPM vs load with severity coloring" },
+      { "type": "new", "platform": "both", "text": "LTFT/STFT fuel trim analysis by RPM zone" },
+      { "type": "new", "platform": "both", "text": "Multi-log compare overlay in Log Analyzer" },
+      { "type": "new", "platform": "both", "text": "Chart annotations — tap to pin notes at any time index" },
+      { "type": "new", "platform": "both", "text": "PNG export for any chart view" },
+      { "type": "new", "platform": "both", "text": "Auto-detect BM3 vs MHD log format with badge" },
+      { "type": "new", "platform": "both", "text": "Tune health score (0–100) per log, shown on Dashboard" },
+      { "type": "new", "platform": "both", "text": "Log health timeline chart on Dashboard" },
+      { "type": "improved", "platform": "ios", "text": "Haptic feedback on iOS for calculation results and risk alerts" },
+      { "type": "improved", "platform": "web", "text": "Station finder link to nearest E85 pump" }
+    ]
+  },
+  {
+    "version": "1.3.0",
+    "date": "2024-11-01",
+    "title": "Log Analyzer",
+    "changes": [
+      { "type": "new", "platform": "both", "text": "Full log analyzer with AFR, boost, HPFP, and IAT gauges" },
+      { "type": "new", "platform": "both", "text": "Timing correction per-cylinder heatmap" },
+      { "type": "improved", "platform": "both", "text": "Dashboard redesign with active blend card" }
+    ]
+  },
+  {
+    "version": "1.0.0",
+    "date": "2024-09-10",
+    "title": "Initial Release",
+    "changes": [
+      { "type": "new", "platform": "both", "text": "E85 blend calculator with precision mode" },
+      { "type": "new", "platform": "both", "text": "Dark mode support" },
+      { "type": "new", "platform": "ios", "text": "iOS app via Capacitor" }
+    ]
+  }
+]
