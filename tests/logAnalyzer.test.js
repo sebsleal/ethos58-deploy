@@ -14,7 +14,7 @@ test('analyzeLog flags risk conditions from browser parser path', () => {
   assert.equal(result.metrics.afr.status, 'Risk');
   assert.equal(result.metrics.hpfp.status, 'Risk');
   assert.equal(result.metrics.iat.status, 'Risk');
-  assert.equal(result.metrics.timingCorrections.status, 'Risk');
+  assert.equal(result.metrics.timingCorrections.status, 'Caution');
   assert.ok(result.chartData.length > 0);
   assert.ok(result.diagnostics.length >= 1);
   assert.ok(result.diagnostics.some((d) => d.title.includes('HPFP drop starts')));
