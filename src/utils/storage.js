@@ -262,7 +262,7 @@ export function clearActiveBlend() {
 const SETTINGS_DEFAULTS = {
   theme:          'system',
   units:          'US',
-  downsampling:   'High Quality (1600 pts)',
+  downsampling:   'Original (All Data)',
   lineThickness:  'Normal (1.5px)',
   timeFormat:     'Elapsed (Seconds)',
   defaultPreset:  'None (Clear)',
