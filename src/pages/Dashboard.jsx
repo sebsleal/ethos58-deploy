@@ -1117,6 +1117,7 @@ function CarProfileCard({ profile, isActive, onSetActive, onDelete }) {
 }
 
 function DashboardOverview({ snapshot, searchQuery, filterActive, onOpenAnalysis, onOpenGarage, onOpenCalculator, onSetActiveView, onCarProfilesChange }) {
+  const { toast } = useToast();
   const filteredSearch = searchQuery.trim().toLowerCase();
   const flaggedLogs = snapshot.recentLogs.filter((log) => log.status !== 'Safe');
   const activeBlend = snapshot.activeBlend;
@@ -1275,13 +1276,18 @@ function DashboardOverview({ snapshot, searchQuery, filterActive, onOpenAnalysis
                   profile={profile}
                   isActive={profile.id === activeCarId}
                   onSetActive={() => {
-                    setActiveCar(profile.id === activeCarId ? null : profile.id);
+                    const newId = profile.id === activeCarId ? null : profile.id;
+                    setActiveCar(newId);
                     onCarProfilesChange();
+                    const name = profile.nickname || profile.name || 'Car';
+                    if (newId) toast(`${name} set as active.`, { variant: 'success' });
+                    else toast(`${name} deactivated.`, { variant: 'info' });
                   }}
                   onDelete={() => {
                     if (!window.confirm(`Delete "${profile.name || 'this profile'}"?`)) return;
                     deleteCarProfile(profile.id);
                     onCarProfilesChange();
+                    toast(`${profile.nickname || profile.name || 'Car'} deleted.`, { variant: 'info' });
                   }}
                 />
               ))}
@@ -2432,6 +2438,10 @@ function GarageWorkspace({ snapshot, onSnapshotRefresh, onAnalyzeWithCar }) {
     const newId = activeCarId === id ? null : id;
     setActiveCar(newId);
     setActiveCarId(newId);
+    const profile = profiles.find((p) => p.id === id);
+    const name = profile?.nickname || 'Car';
+    if (newId) toast(`${name} set as active.`, { variant: 'success' });
+    else toast(`${name} deactivated.`, { variant: 'info' });
   };
 
   const refresh = () => setProfiles(getCarProfiles());
