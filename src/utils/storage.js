@@ -276,7 +276,18 @@ export function getSettings() {
     // Back-compat: pick up legacy keys written directly
     const theme = localStorage.getItem(KEYS.THEME) || stored.theme || SETTINGS_DEFAULTS.theme;
     const units = localStorage.getItem(KEYS.UNITS) || stored.units || SETTINGS_DEFAULTS.units;
-    return { ...SETTINGS_DEFAULTS, ...stored, theme, units };
+    const settings = { ...SETTINGS_DEFAULTS, ...stored, theme, units };
+
+    // Migration v2: users who had the old 'High Quality (1600 pts)' default get reset
+    // to the new 'Original (All Data)' default. Only runs once (_settingsV is absent).
+    if (!stored._settingsV) {
+      if (settings.downsampling === 'High Quality (1600 pts)') {
+        settings.downsampling = 'Original (All Data)';
+      }
+      localStorage.setItem(KEYS.SETTINGS, JSON.stringify({ ...settings, _settingsV: 2 }));
+    }
+
+    return settings;
   } catch {
     return { ...SETTINGS_DEFAULTS };
   }
