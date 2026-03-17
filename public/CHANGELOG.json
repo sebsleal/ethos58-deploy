@@ -1,5 +1,25 @@
 [
   {
+    "version": "2.5.0",
+    "date": "2026-03-17",
+    "title": "Design Overhaul + Compare Logs + Blend History",
+    "changes": [
+      { "type": "new", "platform": "both", "text": "Compare Logs view: select any two garage logs to see a side-by-side metric delta table (AFR, HPFP, IAT, timing pull, health score) and an overlaid AFR/boost chart" },
+      { "type": "new", "platform": "both", "text": "Health Trend Chart: the static tune health gauge on the dashboard is replaced with a 14-log sparkline that shows health score trajectory and point delta across recent sessions" },
+      { "type": "new", "platform": "both", "text": "Car profile widgets now appear at the top of the dashboard kanban so your active car is always one click away without navigating to Settings" },
+      { "type": "new", "platform": "both", "text": "AFR distribution histogram in the Analyzer shows sample count per 0.25 AFR bucket, color-coded green (near target), amber (drift), and red (out of bounds)" },
+      { "type": "new", "platform": "both", "text": "Timing correction distribution histogram in the Analyzer shows how often each degree of pull was recorded, green for positive values, amber for mild pulls, red for hard pulls" },
+      { "type": "new", "platform": "both", "text": "Blend composition bar in the Blend Calculator: an animated stacked bar shows the E85-to-pump-gas ratio visually after every calculation" },
+      { "type": "new", "platform": "both", "text": "Blend history panel: every calculation is stored and viewable via the new History button in the Blend Calculator header, with date, volumes, and resulting blend" },
+      { "type": "new", "platform": "both", "text": "Log-to-blend integration: after analyzing a log, a 'Use Exx in blend lab' button appears in the Analyzer that pre-fills the current ethanol field in the Calculator and shows a confirmation banner" },
+      { "type": "improved", "platform": "both", "text": "Dark/light theme switching now crossfades over 150ms instead of flashing instantly" },
+      { "type": "improved", "platform": "both", "text": "Analyzer loading state replaced with a skeleton shimmer layout that mirrors the results structure, reducing perceived wait time" },
+      { "type": "improved", "platform": "both", "text": "Empty kanban columns now show contextual empty states with action buttons instead of generic placeholder text" },
+      { "type": "improved", "platform": "both", "text": "CSS token system expanded with spacing, border-radius, shadow, and transition-duration variables for consistent styling across the app" },
+      { "type": "improved", "platform": "both", "text": "Interactive card hover/active states and standardized focus ring and disabled styles added globally" }
+    ]
+  },
+  {
     "version": "2.4.0",
     "date": "2026-03-16",
     "title": "Garage QOL + Active Car Pre-fill",

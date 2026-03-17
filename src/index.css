@@ -6,10 +6,12 @@
 
 @layer base {
   :root {
+    /* ── Color tokens ───────────────────────────────────────── */
     --bg-page: #f0ede8;
     --bg-surface: #ffffff;
     --bg-muted: #f7f5f1;
     --border: #e8e4de;
+    --border-strong: #cbc7c0;
     --text-primary: #1a1a1a;
     --text-secondary: #9a958e;
     --text-muted: #b5b0a6;
@@ -18,6 +20,7 @@
     --success-text: #22a96e;
     --warn-bg: #fdf3e5;
     --warn-text: #c97f22;
+    --danger-bg: rgba(224, 81, 58, 0.08);
     --danger-text: #e0513a;
     --accent-yellow: #e8c97a;
     --dark-card-bg: #1a1a1a;
@@ -29,6 +32,38 @@
     --page-gradient-start: #f4f1eb;
     --selection: rgba(26, 26, 26, 0.12);
     --focus-ring: rgba(26, 26, 26, 0.18);
+
+    /* ── Spacing scale ──────────────────────────────────────── */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+
+    /* ── Border radius scale ────────────────────────────────── */
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 10px;
+    --radius-xl: 12px;
+    --radius-2xl: 16px;
+
+    /* ── Shadow scale ───────────────────────────────────────── */
+    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+    --shadow-elevated: 0 4px 16px rgba(0, 0, 0, 0.08), 0 1px 4px rgba(0, 0, 0, 0.04);
+    --shadow-overlay: 0 12px 40px rgba(0, 0, 0, 0.14);
+
+    /* ── Transition tokens ──────────────────────────────────── */
+    --duration-fast: 100ms;
+    --duration-normal: 150ms;
+    --duration-slow: 250ms;
+    --ease-default: cubic-bezier(0.4, 0, 0.2, 1);
+    --ease-out: cubic-bezier(0, 0, 0.2, 1);
+
+    /* ── Skeleton shimmer ───────────────────────────────────── */
+    --skeleton-base: #ece9e4;
+    --skeleton-shine: #f5f3ef;
+
     color-scheme: light;
   }
 
@@ -37,6 +72,7 @@
     --bg-surface: #201c19;
     --bg-muted: #2a2522;
     --border: #3a342f;
+    --border-strong: #5a534c;
     --text-primary: #f3eee8;
     --text-secondary: #b1a89e;
     --text-muted: #837b72;
@@ -45,6 +81,7 @@
     --success-text: #72d7aa;
     --warn-bg: rgba(201, 127, 34, 0.18);
     --warn-text: #f0bc72;
+    --danger-bg: rgba(255, 143, 124, 0.10);
     --danger-text: #ff8f7c;
     --accent-yellow: #e8c97a;
     --dark-card-bg: #0f0d0b;
@@ -56,11 +93,26 @@
     --page-gradient-start: #1b1714;
     --selection: rgba(255, 255, 255, 0.12);
     --focus-ring: rgba(255, 255, 255, 0.2);
+
+    --skeleton-base: #2a2522;
+    --skeleton-shine: #332e2a;
+
     color-scheme: dark;
   }
 
   * {
     box-sizing: border-box;
+  }
+
+  /* Dark mode smooth transition */
+  *, *::before, *::after {
+    transition: background-color var(--duration-normal) var(--ease-default),
+                border-color var(--duration-normal) var(--ease-default),
+                color var(--duration-fast) var(--ease-default);
+  }
+  /* Exclude transitions that should stay instant (transforms, opacity for animations) */
+  *[class*="animate-"], *[class*="motion"], canvas, svg * {
+    transition: none;
   }
 
   html,
@@ -83,6 +135,13 @@
     color: var(--text-primary);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      transition: none !important;
+      animation-duration: 0.01ms !important;
+    }
   }
 
   button,
@@ -131,6 +190,21 @@
   to { transform: rotate(360deg); }
 }
 
+@keyframes skeleton-shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes toast-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(4px) scale(0.97); }
+}
+
 .spinner {
   width: 14px;
   height: 14px;
@@ -140,3 +214,91 @@
   animation: spin 0.7s linear infinite;
   flex-shrink: 0;
 }
+
+/* ── Skeleton loading ──────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--skeleton-base) 25%,
+    var(--skeleton-shine) 50%,
+    var(--skeleton-base) 75%
+  );
+  background-size: 800px 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+  border-radius: var(--radius-md);
+  transition: none !important;
+}
+
+/* ── Toast container ───────────────────────────────────────── */
+#toast-root {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+  max-width: 360px;
+  width: calc(100vw - 48px);
+}
+
+.toast-item {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-overlay);
+  padding: 12px 14px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.toast-item[data-variant="success"] { border-color: var(--success-text); }
+.toast-item[data-variant="error"]   { border-color: var(--danger-text); }
+.toast-item[data-variant="warn"]    { border-color: var(--warn-text); }
+
+.toast-item[data-state="entering"] { animation: toast-in 0.22s var(--ease-out) forwards; }
+.toast-item[data-state="leaving"]  { animation: toast-out 0.18s var(--ease-default) forwards; }
+
+/* ── Interactive card states ───────────────────────────────── */
+.interactive-card {
+  transition: box-shadow var(--duration-normal) var(--ease-default),
+              transform var(--duration-normal) var(--ease-default),
+              border-color var(--duration-normal) var(--ease-default) !important;
+  cursor: pointer;
+}
+.interactive-card:hover {
+  box-shadow: var(--shadow-elevated);
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+.interactive-card:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-card);
+}
+
+/* ── Disabled state ────────────────────────────────────────── */
+button:disabled,
+input:disabled,
+select:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* ── Focus ring (enhanced) ─────────────────────────────────── */
+:where(button, input, textarea, select):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* ── Health trend sparkline helper ────────────────────────── */
+.health-bar-safe    { background: var(--success-text); }
+.health-bar-caution { background: var(--warn-text); }
+.health-bar-risk    { background: var(--danger-text); }
+.health-bar-empty   { background: var(--border); }

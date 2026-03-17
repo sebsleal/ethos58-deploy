@@ -13,10 +13,14 @@ import {
   deleteStationPreset,
   getFuelPlannerDefaults,
   saveFuelPlannerDefaults,
+  getBlendHistory,
+  clearBlendHistory,
+  getPendingBlend,
+  clearPendingBlend,
 } from '../utils/storage';
 import { trackEvent, trackError } from '../utils/telemetry';
 import { hapticSuccess, hapticWarning, hapticError, hapticLight } from '../utils/haptics';
-import { Droplet, AlertTriangle, BookmarkPlus, Bookmark, Trash2, RotateCcw, MapPin, Star, ChevronDown, Calculator as CalculatorIcon, Route } from 'lucide-react';
+import { Droplet, AlertTriangle, BookmarkPlus, Bookmark, Trash2, RotateCcw, MapPin, Star, ChevronDown, Calculator as CalculatorIcon, Route, History, X, Zap } from 'lucide-react';
 import { PageHeader } from '../components/ui';
 
 const LITERS_PER_GALLON = 3.78541;
@@ -59,6 +63,9 @@ const Calculator = () => {
   const [profileName, setProfileName] = useState('');
   const [showProfileSave, setShowProfileSave] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [blendHistory, setBlendHistory] = useState(getBlendHistory);
+  const [showHistory, setShowHistory] = useState(false);
+  const [pendingBanner, setPendingBanner] = useState(() => getPendingBlend());
 
   const [refuelGallons, setRefuelGallons] = useState(5.0);
   const [refuelPumpEthanol, setRefuelPumpEthanol] = useState(0);
@@ -134,6 +141,17 @@ const Calculator = () => {
     document.addEventListener('pointerdown', handlePointerDown);
     return () => document.removeEventListener('pointerdown', handlePointerDown);
   }, [showProfileMenu]);
+
+  // Apply pending blend from log-to-blend integration
+  useEffect(() => {
+    const pending = getPendingBlend();
+    if (!pending) return;
+    if (pending.currentE !== undefined) {
+      setFormData((prev) => ({ ...prev, currentE: Number(pending.currentE) }));
+    }
+    setPendingBanner(pending);
+    clearPendingBlend();
+  }, []);
 
   const toDisplayVolume = (gallons) => {
     if (gallons === '' || gallons === null || gallons === undefined) return '';
@@ -248,6 +266,7 @@ const Calculator = () => {
       };
       saveActiveBlend(mapped);
       setResult(mapped);
+      setBlendHistory(getBlendHistory());
       if (mapped.warnings?.length) hapticWarning();
       else hapticSuccess();
       trackEvent('blend_calculation_succeeded', {
@@ -394,6 +413,11 @@ const Calculator = () => {
 
   const plannerPumpEthanol = calibratedPumpE ?? pumpEthanol;
 
+  const formatHistoryDate = (iso) => {
+    if (!iso) return '';
+    return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       <PageHeader
@@ -449,6 +473,15 @@ const Calculator = () => {
           >
             <BookmarkPlus size={14} className="text-brand-500" /> Save Profile
           </button>
+          {blendHistory.length > 0 && (
+            <button
+              onClick={() => setShowHistory(v => !v)}
+              className="app-button-secondary flex items-center gap-2 px-3 py-2 text-xs font-semibold"
+              aria-pressed={showHistory}
+            >
+              <History size={14} className="text-brand-500" /> History
+            </button>
+          )}
         </div>
         )}
       />
@@ -464,6 +497,57 @@ const Calculator = () => {
           />
           <button onClick={handleSaveProfile} className="text-xs font-bold text-brand-600 dark:text-brand-400 hover:text-brand-700 px-2 py-1 rounded-md bg-brand-100 dark:bg-brand-500/20 transition-colors">Save</button>
           <button onClick={() => setShowProfileSave(false)} className="text-slate-400 hover:text-slate-600 text-xs px-1" aria-label="Close save profile panel">✕</button>
+        </div>
+      )}
+
+      {/* Log-to-blend banner */}
+      {pendingBanner && (
+        <div className="flex items-center gap-3 p-3 bg-[var(--warn-bg)] border border-[var(--accent-yellow)] rounded-xl animate-fade-in">
+          <Zap size={14} className="text-[var(--warn-text)] shrink-0" />
+          <p className="flex-1 text-xs text-[var(--warn-text)] font-medium">
+            Current fuel auto-filled from log analysis: <strong>E{pendingBanner.currentE}</strong>. Adjust other fields and calculate your target blend.
+          </p>
+          <button onClick={() => setPendingBanner(null)} className="text-[var(--warn-text)] opacity-60 hover:opacity-100" aria-label="Dismiss">
+            <X size={13} />
+          </button>
+        </div>
+      )}
+
+      {/* Blend history panel */}
+      {showHistory && (
+        <div className="surface-card p-5 animate-fade-in">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-bold text-slate-900 dark:text-gray-100 flex items-center gap-2"><History size={14} /> Blend History</h2>
+            <div className="flex items-center gap-2">
+              {blendHistory.length > 0 && (
+                <button
+                  onClick={() => { if (!window.confirm('Clear all blend history?')) return; clearBlendHistory(); setBlendHistory([]); }}
+                  className="text-xs text-red-400 hover:text-red-600 transition-colors"
+                >
+                  Clear all
+                </button>
+              )}
+              <button onClick={() => setShowHistory(false)} className="text-slate-400 hover:text-slate-600" aria-label="Close history">
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+          {blendHistory.length === 0 ? (
+            <p className="text-sm text-slate-400 dark:text-gray-500">No blend calculations recorded yet.</p>
+          ) : (
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {blendHistory.slice(0, 20).map((entry) => (
+                <div key={entry.id} className="surface-inset flex items-center justify-between gap-3 px-3 py-2">
+                  <div>
+                    <span className="font-mono text-xs font-bold text-brand-500">E{entry.resultingBlend}</span>
+                    <span className="mx-2 text-slate-300 dark:text-white/20">·</span>
+                    <span className="text-xs text-slate-500 dark:text-gray-400">{formatResultVolume(entry.e85Gallons)} E85 + {formatResultVolume(entry.pumpGallons)} pump</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-slate-400 dark:text-gray-500 shrink-0">{formatHistoryDate(entry.date)}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -770,6 +854,35 @@ const BlendPane = ({ precisionMode, setPrecisionMode, pumpOctane, setPumpOctane,
       <h2 className="text-base font-bold text-slate-900 dark:text-gray-100 mb-6 border-b border-slate-100 dark:border-white/5 pb-4">Blend Result</h2>
       {result ? (
         <div className="space-y-5">
+          {/* Blend composition visual */}
+          {(() => {
+            const totalGal = (Number(result.e85Gallons) || 0) + (Number(result.pumpGallons) || 0);
+            if (totalGal <= 0) return null;
+            const e85Pct = ((Number(result.e85Gallons) || 0) / totalGal) * 100;
+            const pumpPct = 100 - e85Pct;
+            return (
+              <div>
+                <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-gray-400 mb-2">Blend composition</p>
+                <div className="flex rounded-lg overflow-hidden h-8" title={`E85: ${e85Pct.toFixed(1)}% | Pump: ${pumpPct.toFixed(1)}%`}>
+                  <div
+                    className="flex items-center justify-center text-white text-[10px] font-bold transition-all duration-500"
+                    style={{ width: `${e85Pct}%`, backgroundColor: '#e8a63a', minWidth: e85Pct > 5 ? undefined : 0 }}
+                  >
+                    {e85Pct > 12 ? `E85 ${e85Pct.toFixed(0)}%` : ''}
+                  </div>
+                  <div
+                    className="flex items-center justify-center text-slate-600 dark:text-gray-300 text-[10px] font-bold flex-1 bg-slate-100 dark:bg-zinc-800 transition-all duration-500"
+                  >
+                    {pumpPct > 12 ? `Pump ${pumpPct.toFixed(0)}%` : ''}
+                  </div>
+                </div>
+                <div className="flex justify-between mt-1 text-[10px] text-slate-400 dark:text-gray-500 font-mono">
+                  <span>{formatResultVolume(result.e85Gallons)} {resultVolumeLabel} E85</span>
+                  <span>{formatResultVolume(result.pumpGallons)} {resultVolumeLabel} pump</span>
+                </div>
+              </div>
+            );
+          })()}
           <div className="rounded-xl bg-brand-50 dark:bg-brand-500/10 border border-brand-200 dark:border-brand-500/20 p-4">
             <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-gray-400">Add E85</p>
             <p className="text-2xl font-black text-brand-600 dark:text-brand-400">{formatResultVolume(result.e85Gallons)} {resultVolumeLabel}</p>

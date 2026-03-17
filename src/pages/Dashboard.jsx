@@ -41,8 +41,11 @@ import {
 import {
   Area,
   AreaChart,
+  Bar,
+  BarChart,
   Brush,
   CartesianGrid,
+  Cell,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -85,6 +88,12 @@ import {
   saveSetting,
   saveStationPreset,
   updateGarageLogMeta,
+  getCarProfiles,
+  saveCarProfile,
+  deleteCarProfile,
+  getActiveCar,
+  setActiveCar,
+  setPendingBlend,
 } from '../utils/storage';
 import { parseViewerCsv } from '../utils/viewerCsv';
 
@@ -145,13 +154,10 @@ const analyzerDefaults = {
 const engineOptions = ['B58 Gen1', 'B58 Gen2', 'S58', 'N55', 'N54', 'Other'];
 const tuneOptions = ['Stage 1', 'Stage 2', 'Stage 2+', 'Custom E-tune'];
 
-// Car profile storage
-function getCarProfiles() { try { return JSON.parse(localStorage.getItem('ethos_car_profiles') || '[]'); } catch { return []; } }
-function saveCarProfile(p) { const list = getCarProfiles(); list.push({ ...p, id: Date.now().toString() }); localStorage.setItem('ethos_car_profiles', JSON.stringify(list)); }
-function updateCarProfile(id, updates) { localStorage.setItem('ethos_car_profiles', JSON.stringify(getCarProfiles().map((p) => (p.id === id ? { ...p, ...updates } : p)))); }
-function deleteCarProfile(id) { localStorage.setItem('ethos_car_profiles', JSON.stringify(getCarProfiles().filter((p) => p.id !== id))); }
-function getActiveCar() { return localStorage.getItem('ethos_active_car') || null; }
-function setActiveCar(id) { if (id) localStorage.setItem('ethos_active_car', id); else localStorage.removeItem('ethos_active_car'); }
+// updateCarProfile helper (local wrapper for Dashboard use)
+function updateCarProfile(id, updates) {
+  saveCarProfile({ ...getCarProfiles().find((p) => p.id === id), ...updates });
+}
 
 function loadSnapshot() {
   return {
@@ -161,6 +167,8 @@ function loadSnapshot() {
     settings: getSettings(),
     profiles: getBlendProfiles(),
     stationPresets: getStationPresets(),
+    carProfiles: getCarProfiles(),
+    activeCarId: getActiveCar(),
   };
 }
 
@@ -791,6 +799,7 @@ function Sidebar({ activeView, onSelect, snapshot }) {
       label: 'Signals',
       items: [
         { id: 'calculator', name: 'Blend lab', icon: CalculatorIcon },
+        { id: 'compare', name: 'Compare logs', icon: ArrowUpDown },
         { id: 'garage', name: 'Garage', icon: Car },
         { id: 'archive', name: 'Archive', icon: FolderArchive, badge: garageCount ? String(garageCount) : null },
         { id: 'updates', name: 'Update log', icon: Sparkles },
@@ -943,29 +952,49 @@ function PullSessionsChart({ bars }) {
   );
 }
 
-function TuneHealthGauge({ healthScore }) {
-  const radius = 30;
-  const arcLength = Math.PI * radius;
-  const progress = Math.max(0.1, Math.min((healthScore || 0) / 100, 1));
+function healthBarClass(score) {
+  if (score === null || score === undefined) return 'health-bar-empty';
+  if (score >= 75) return 'health-bar-safe';
+  if (score >= 50) return 'health-bar-caution';
+  return 'health-bar-risk';
+}
+
+function HealthTrendChart({ recentLogs }) {
+  // Build up to 14 bars from recent logs (most recent on right)
+  const bars = [...recentLogs].reverse().slice(0, 14).map((log) => ({
+    score: Number.isFinite(Number(log.healthScore)) ? Number(log.healthScore) : null,
+    filename: log.filename,
+    date: log.date,
+  }));
+
+  // Pad to 14
+  while (bars.length < 14) bars.unshift({ score: null, filename: null, date: null });
+
+  const avgScore = bars.filter((b) => b.score !== null).reduce((s, b, _, a) => s + b.score / a.length, 0) || 0;
+  const visibleBars = bars.filter((b) => b.score !== null);
+  const trend = visibleBars.length >= 2
+    ? visibleBars[visibleBars.length - 1].score - visibleBars[0].score
+    : 0;
 
   return (
-    <div className="flex h-full flex-col items-center justify-center">
-      <svg viewBox="0 0 80 48" className="h-12 w-20 overflow-visible">
-        <path d="M10 42 A30 30 0 0 1 70 42" fill="none" stroke="var(--border)" strokeWidth="6" strokeLinecap="round" />
-        <motion.path
-          d="M10 42 A30 30 0 0 1 70 42"
-          fill="none"
-          stroke="var(--text-primary)"
-          strokeWidth="6"
-          strokeLinecap="round"
-          strokeDasharray={arcLength}
-          initial={{ strokeDashoffset: arcLength }}
-          animate={{ strokeDashoffset: arcLength * (1 - progress) }}
-          transition={{ duration: 0.7, ease: 'easeOut', delay: 0.2 }}
-        />
-      </svg>
-      <p className="mt-1 text-[15px] font-medium text-[var(--text-primary)]">{formatMetric(healthScore, '%', 1)}</p>
-      <p className="mt-1 font-mono text-[10px] text-[var(--text-muted)]">Tune health</p>
+    <div className="flex h-full flex-col">
+      <div className="flex items-baseline justify-between mb-2">
+        <p className="text-[12px] font-medium text-[var(--text-primary)]">Health trend</p>
+        <span className={`font-mono text-[10px] ${trend > 0 ? 'text-[var(--success-text)]' : trend < 0 ? 'text-[var(--danger-text)]' : 'text-[var(--text-muted)]'}`}>
+          {trend > 0 ? `+${trend.toFixed(0)}` : trend < 0 ? trend.toFixed(0) : '—'} pts
+        </span>
+      </div>
+      <div className="flex h-10 items-end gap-[3px] flex-1">
+        {bars.map((bar, i) => (
+          <div
+            key={i}
+            title={bar.score !== null ? `${bar.filename ?? ''}: ${bar.score}%` : ''}
+            className={`flex-1 rounded-t-[2px] transition-none ${healthBarClass(bar.score)}`}
+            style={{ height: bar.score !== null ? `${Math.max(10, bar.score)}%` : '12%', opacity: bar.score !== null ? 1 : 0.25 }}
+          />
+        ))}
+      </div>
+      <p className="mt-2 font-mono text-[10px] text-[var(--text-muted)]">avg {avgScore.toFixed(0)}% · last {visibleBars.length} logs</p>
     </div>
   );
 }
@@ -985,10 +1014,6 @@ function NumericStat({ label, target, detail }) {
 }
 
 function StatsStrip({ snapshot }) {
-  const recentHealth = snapshot.recentLogs.filter((log) => Number.isFinite(Number(log.healthScore)));
-  const avgHealth = recentHealth.length
-    ? recentHealth.reduce((sum, log) => sum + Number(log.healthScore), 0) / recentHealth.length
-    : 0;
   const flaggedCount = snapshot.recentLogs.filter((log) => log.status !== 'Safe').length;
   const garageCount = snapshot.garageLogs.length;
   const bars = buildSessionBars(snapshot.recentLogs);
@@ -1002,7 +1027,7 @@ function StatsStrip({ snapshot }) {
         <PullSessionsChart bars={bars} />
       </div>
       <div className="border-b border-[var(--border)] py-5 md:border-b-0 md:border-r md:px-6 md:py-0">
-        <TuneHealthGauge healthScore={avgHealth} />
+        <HealthTrendChart recentLogs={snapshot.recentLogs} />
       </div>
       <div className="border-b border-[var(--border)] py-5 md:border-b-0 md:border-r md:px-6 md:py-0">
         <NumericStat label="Flagged pulls" target={flaggedCount} detail={`${snapshot.recentLogs.length} recent sessions tracked`} />
@@ -1014,7 +1039,7 @@ function StatsStrip({ snapshot }) {
   );
 }
 
-function KanbanColumn({ column }) {
+function KanbanColumn({ column, emptyState }) {
   return (
     <motion.section variants={itemVariants}>
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -1028,7 +1053,9 @@ function KanbanColumn({ column }) {
       <motion.div variants={containerVariants} className="space-y-[10px]">
         {column.cards.length ? column.cards.map((card) => (
           card.kind === 'dark' ? <FlaggedCard key={card.title} card={card} /> : <StandardCard key={card.title} card={card} />
-        )) : (
+        )) : emptyState ? (
+          <EmptyState icon={emptyState.icon} title={emptyState.title} body={emptyState.body} actionLabel={emptyState.actionLabel} onAction={emptyState.onAction} />
+        ) : (
           <div className="rounded-[10px] border border-dashed border-[var(--border)] bg-[var(--bg-surface)] px-4 py-8 text-center">
             <p className="text-[11px] text-[var(--text-secondary)]">Nothing to show yet.</p>
           </div>
@@ -1038,7 +1065,54 @@ function KanbanColumn({ column }) {
   );
 }
 
-function DashboardOverview({ snapshot, searchQuery, filterActive, onOpenAnalysis, onOpenGarage, onOpenCalculator }) {
+function CarProfileCard({ profile, isActive, onSetActive, onDelete }) {
+  return (
+    <motion.div
+      variants={itemVariants}
+      className={`rounded-[10px] border bg-[var(--bg-surface)] px-4 py-[14px] transition-all ${
+        isActive ? 'border-[var(--text-primary)]' : 'border-[var(--border)]'
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div className="flex items-center gap-2">
+          <Car size={12} strokeWidth={1.8} className="shrink-0 text-[var(--text-muted)]" />
+          <h3 className="text-[12px] font-medium text-[var(--text-primary)] truncate max-w-[120px]">
+            {profile.name || 'Unnamed car'}
+          </h3>
+        </div>
+        {isActive && (
+          <span className="shrink-0 rounded-[4px] px-[6px] py-[2px] font-mono text-[9px] bg-[var(--success-bg)] text-[var(--success-text)]">
+            ACTIVE
+          </span>
+        )}
+      </div>
+      <div className="font-mono text-[10px] text-[var(--text-muted)] space-y-0.5 mb-3">
+        {profile.engine && <p>{profile.engine}</p>}
+        {profile.tuneStage && <p>{profile.tuneStage}</p>}
+        {(profile.ethanol !== '' && profile.ethanol !== undefined) && <p>E{profile.ethanol} blend</p>}
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onSetActive}
+          className="text-[10px] font-medium text-[var(--text-dark-muted)] hover:text-[var(--text-primary)] transition-colors"
+        >
+          {isActive ? 'Deactivate' : 'Set active'}
+        </button>
+        <span className="text-[var(--border)]">·</span>
+        <button
+          type="button"
+          onClick={onDelete}
+          className="text-[10px] font-medium text-[var(--danger-text)] opacity-60 hover:opacity-100 transition-opacity"
+        >
+          Delete
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
+function DashboardOverview({ snapshot, searchQuery, filterActive, onOpenAnalysis, onOpenGarage, onOpenCalculator, onSetActiveView, onCarProfilesChange }) {
   const filteredSearch = searchQuery.trim().toLowerCase();
   const flaggedLogs = snapshot.recentLogs.filter((log) => log.status !== 'Safe');
   const activeBlend = snapshot.activeBlend;
@@ -1160,8 +1234,60 @@ function DashboardOverview({ snapshot, searchQuery, filterActive, onOpenAnalysis
   const [mobileTab, setMobileTab] = useState(columns[0].title);
   const activeColumn = columns.find((c) => c.title === mobileTab) ?? columns[0];
 
+  const carProfiles = snapshot.carProfiles ?? [];
+  const activeCarId = snapshot.activeCarId;
+  const filteredCars = carProfiles.filter((p) =>
+    !filteredSearch || `${p.name ?? ''} ${p.engine ?? ''} ${p.tuneStage ?? ''}`.toLowerCase().includes(filteredSearch),
+  );
+
+  // Column-specific empty states
+  const emptyStates = {
+    Queued: { icon: Upload, title: 'No recent sessions', body: 'Upload a CSV log to start analyzing your pulls.', actionLabel: 'Upload CSV', onAction: () => onSetActiveView('analyzer') },
+    Library: { icon: FolderArchive, title: 'Garage is empty', body: 'Analyzed logs are automatically archived here.', actionLabel: null },
+    Flagged: { icon: AlertCircle, title: 'No flagged pulls', body: 'Logs with Caution or Risk status will appear here.', actionLabel: null },
+    Fuel: { icon: CalculatorIcon, title: 'No fuel data', body: 'Calculate a blend to see your active blend and saved profiles.', actionLabel: 'Open blend lab', onAction: () => onOpenCalculator() },
+  };
+
   return (
     <motion.div variants={itemVariants} className="flex-1 overflow-auto bg-[var(--bg-page)]">
+      {/* Car profiles strip */}
+      {(carProfiles.length > 0 || !filteredSearch) && (
+        <div className="border-b border-[var(--border)] bg-[var(--bg-surface)] px-6 py-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-[13px] font-medium text-[var(--text-primary)]">Garage</h2>
+            <button
+              type="button"
+              onClick={() => onSetActiveView('settings')}
+              className="text-[11px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+            >
+              Manage profiles →
+            </button>
+          </div>
+          {filteredCars.length > 0 ? (
+            <motion.div variants={containerVariants} className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+              {filteredCars.slice(0, 6).map((profile) => (
+                <CarProfileCard
+                  key={profile.id}
+                  profile={profile}
+                  isActive={profile.id === activeCarId}
+                  onSetActive={() => {
+                    setActiveCar(profile.id === activeCarId ? null : profile.id);
+                    onCarProfilesChange();
+                  }}
+                  onDelete={() => {
+                    if (!window.confirm(`Delete "${profile.name || 'this profile'}"?`)) return;
+                    deleteCarProfile(profile.id);
+                    onCarProfilesChange();
+                  }}
+                />
+              ))}
+            </motion.div>
+          ) : (
+            <p className="text-[11px] text-[var(--text-secondary)]">No car profiles saved yet. Add one in Settings.</p>
+          )}
+        </div>
+      )}
+
       {/* Mobile: tab bar + single column */}
       <div className="md:hidden">
         <div className="flex gap-1 border-b border-[var(--border)] px-4 pt-4 pb-0">
@@ -1184,20 +1310,26 @@ function DashboardOverview({ snapshot, searchQuery, filterActive, onOpenAnalysis
           <motion.div variants={containerVariants} className="space-y-[10px]">
             {activeColumn.cards.length ? activeColumn.cards.map((card) => (
               card.kind === 'dark' ? <FlaggedCard key={card.title} card={card} /> : <StandardCard key={card.title} card={card} />
-            )) : (
-              <div className="rounded-[10px] border border-dashed border-[var(--border)] bg-[var(--bg-surface)] px-4 py-8 text-center">
-                <p className="text-[11px] text-[var(--text-secondary)]">Nothing to show yet.</p>
-              </div>
-            )}
+            )) : (() => {
+              const es = emptyStates[activeColumn.title];
+              return es ? (
+                <EmptyState icon={es.icon} title={es.title} body={es.body} actionLabel={es.actionLabel} onAction={es.onAction} />
+              ) : (
+                <div className="rounded-[10px] border border-dashed border-[var(--border)] bg-[var(--bg-surface)] px-4 py-8 text-center">
+                  <p className="text-[11px] text-[var(--text-secondary)]">Nothing to show yet.</p>
+                </div>
+              );
+            })()}
           </motion.div>
         </div>
       </div>
 
       {/* Desktop: 4-column kanban grid */}
       <motion.div variants={containerVariants} className="hidden md:grid min-w-[760px] grid-cols-4 gap-[14px] px-6 py-[22px]">
-        {columns.map((column) => (
-          <KanbanColumn key={column.title} column={column} />
-        ))}
+        {columns.map((column) => {
+          const es = emptyStates[column.title];
+          return <KanbanColumn key={column.title} column={column} emptyState={es} />;
+        })}
       </motion.div>
     </motion.div>
   );
@@ -1213,6 +1345,93 @@ function AnalyzerSummary({ analysis }) {
       <StatCard label="IAT peak" value={formatMetric(metrics.iat.peak_f, 'F', 0)} detail={metrics.iat.note || 'Charge temps look controlled.'} />
       <StatCard label="Timing" value={formatMetric(metrics.timingCorrections.max_correction, ' deg', 1)} detail={metrics.timingCorrections.note || 'No corrections were observed under load.'} />
     </div>
+  );
+}
+
+function SkeletonAnalysis() {
+  return (
+    <div className="space-y-4 animate-pulse">
+      <div className="grid gap-3 md:grid-cols-5">
+        {[...Array(5)].map((_, i) => (
+          <div key={i} className="rounded-[10px] border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-[14px]">
+            <div className="skeleton h-2.5 w-16 mb-3" />
+            <div className="skeleton h-7 w-20 mb-2" />
+            <div className="skeleton h-2 w-32" />
+          </div>
+        ))}
+      </div>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+        <div className="rounded-[10px] border border-[var(--border)] bg-[var(--bg-surface)] p-4">
+          <div className="skeleton h-3 w-32 mb-1" />
+          <div className="skeleton h-2.5 w-48 mb-4" />
+          <div className="skeleton rounded-[6px] h-[300px] w-full" />
+        </div>
+        <div className="rounded-[10px] border border-[var(--border)] bg-[var(--bg-surface)] p-4">
+          <div className="skeleton h-3 w-24 mb-1" />
+          <div className="skeleton h-2.5 w-40 mb-4" />
+          <div className="skeleton rounded-[6px] h-[300px] w-full" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function buildAfrHistogram(chartData) {
+  if (!chartData?.length) return [];
+  const values = chartData.map((r) => r.afrActual).filter((v) => Number.isFinite(v) && v > 0);
+  if (!values.length) return [];
+  const min = Math.floor(Math.min(...values) * 2) / 2;
+  const max = Math.ceil(Math.max(...values) * 2) / 2;
+  const bucketSize = 0.25;
+  const buckets = {};
+  for (let b = min; b <= max; b = Math.round((b + bucketSize) * 100) / 100) {
+    buckets[b.toFixed(2)] = 0;
+  }
+  values.forEach((v) => {
+    const key = (Math.floor(v / bucketSize) * bucketSize).toFixed(2);
+    if (key in buckets) buckets[key]++;
+  });
+  return Object.entries(buckets).map(([afr, count]) => ({
+    afr: Number(afr),
+    count,
+    label: afr,
+  }));
+}
+
+function AfrHistogram({ chartData, afrTarget }) {
+  const bins = useMemo(() => buildAfrHistogram(chartData), [chartData]);
+  if (!bins.length) return null;
+
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <BarChart data={bins} barCategoryGap="2%">
+        <CartesianGrid stroke="var(--border)" vertical={false} />
+        <XAxis dataKey="label" tick={{ fontSize: 9, fill: 'var(--text-muted)', fontFamily: 'DM Mono' }} interval={3} />
+        <YAxis tick={{ fontSize: 9, fill: 'var(--text-muted)', fontFamily: 'DM Mono' }} width={30} />
+        <Tooltip
+          content={({ active, payload }) => {
+            if (!active || !payload?.length) return null;
+            const d = payload[0].payload;
+            return (
+              <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 shadow-[0_12px_24px_rgba(0,0,0,0.08)]">
+                <p className="font-mono text-[10px] text-[var(--text-muted)]">AFR {d.afr.toFixed(2)}</p>
+                <p className="font-mono text-[11px] text-[var(--text-primary)]">{d.count} samples</p>
+              </div>
+            );
+          }}
+        />
+        <Bar dataKey="count" radius={[2, 2, 0, 0]}>
+          {bins.map((b) => {
+            const diff = afrTarget ? b.afr - afrTarget : 0;
+            const color = !afrTarget ? 'var(--text-primary)'
+              : Math.abs(diff) <= 0.25 ? 'var(--success-text)'
+              : diff < -0.5 || diff > 0.75 ? 'var(--danger-text)'
+              : 'var(--warn-text)';
+            return <Cell key={b.label} fill={color} fillOpacity={0.75} />;
+          })}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
   );
 }
 
@@ -1241,6 +1460,7 @@ function AnalyzerWorkspace({
   onCompareUpload,
   onReset,
   onOpenViewer,
+  onOpenCalculator,
   searchQuery,
   filterActive,
 }) {
@@ -1290,13 +1510,20 @@ function AnalyzerWorkspace({
                   <button type="button" onClick={onReset} className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-[12px] text-[var(--text-primary)]">
                     Reset
                   </button>
+                  {analysis && analysis.carDetails?.ethanol !== undefined && analysis.carDetails?.ethanol !== '' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPendingBlend({ currentE: Number(analysis.carDetails.ethanol) });
+                        onOpenCalculator();
+                      }}
+                      className="rounded-[8px] border border-[var(--accent-yellow)] bg-[var(--warn-bg)] px-3 py-2 text-[12px] font-medium text-[var(--warn-text)] flex items-center gap-1.5"
+                    >
+                      <CalculatorIcon size={12} strokeWidth={1.8} />
+                      Use E{analysis.carDetails.ethanol} in blend lab
+                    </button>
+                  )}
                 </div>
-                {analysisState.loading ? (
-                  <div className="mt-3 flex items-center gap-2">
-                    <span className="spinner" />
-                    <p className="text-[11px] text-[var(--text-secondary)]">Parsing and analyzing…</p>
-                  </div>
-                ) : null}
                 {analysisState.error ? <p className="mt-3 text-[11px] text-[var(--danger-text)]">{analysisState.error}</p> : null}
               </div>
 
@@ -1345,7 +1572,9 @@ function AnalyzerWorkspace({
           </SurfaceSection>
         </div>
 
-        {!analysis ? (
+        {analysisState.loading ? (
+          <SkeletonAnalysis />
+        ) : !analysis ? (
           <EmptyState
             icon={Activity}
             title="Analyzer is ready"
@@ -1391,6 +1620,72 @@ function AnalyzerWorkspace({
                 </div>
               </SurfaceSection>
             </div>
+
+            {analysis.chartData?.length > 0 && (
+              <div className="grid gap-4 md:grid-cols-2">
+                <SurfaceSection
+                  title="AFR distribution"
+                  subtitle="Sample count per AFR bucket. Green = near target, amber = drift, red = out of bounds."
+                >
+                  <div className="h-[200px]">
+                    <AfrHistogram chartData={analysis.chartData} afrTarget={analysis.metrics?.afr?.target} />
+                  </div>
+                </SurfaceSection>
+
+                <SurfaceSection
+                  title="Timing correction distribution"
+                  subtitle="How often each correction magnitude was recorded under load."
+                >
+                  <div className="h-[200px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={(() => {
+                          const vals = (analysis.chartData || []).map((r) => r.timingCorrectionCyl1 ?? r.timingCorrection).filter(Number.isFinite);
+                          if (!vals.length) return [];
+                          const min = Math.floor(Math.min(...vals));
+                          const max = Math.ceil(Math.max(...vals));
+                          const buckets = {};
+                          for (let b = min; b <= max; b++) buckets[b] = 0;
+                          vals.forEach((v) => { const k = Math.round(v); if (k in buckets) buckets[k]++; });
+                          return Object.entries(buckets).map(([deg, count]) => ({ deg: Number(deg), count, label: deg }));
+                        })()}
+                        barCategoryGap="4%"
+                      >
+                        <CartesianGrid stroke="var(--border)" vertical={false} />
+                        <XAxis dataKey="label" tick={{ fontSize: 9, fill: 'var(--text-muted)', fontFamily: 'DM Mono' }} />
+                        <YAxis tick={{ fontSize: 9, fill: 'var(--text-muted)', fontFamily: 'DM Mono' }} width={30} />
+                        <Tooltip
+                          content={({ active, payload }) => {
+                            if (!active || !payload?.length) return null;
+                            const d = payload[0].payload;
+                            return (
+                              <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2">
+                                <p className="font-mono text-[10px] text-[var(--text-muted)]">{d.deg >= 0 ? '+' : ''}{d.deg} deg</p>
+                                <p className="font-mono text-[11px] text-[var(--text-primary)]">{d.count} samples</p>
+                              </div>
+                            );
+                          }}
+                        />
+                        <Bar dataKey="count" radius={[2, 2, 0, 0]}>
+                          {(() => {
+                            const vals = (analysis.chartData || []).map((r) => r.timingCorrectionCyl1 ?? r.timingCorrection).filter(Number.isFinite);
+                            if (!vals.length) return [];
+                            const min = Math.floor(Math.min(...vals));
+                            const max = Math.ceil(Math.max(...vals));
+                            const result = [];
+                            for (let b = min; b <= max; b++) {
+                              const color = b >= 0 ? 'var(--success-text)' : b >= -2 ? 'var(--warn-text)' : 'var(--danger-text)';
+                              result.push(<Cell key={b} fill={color} fillOpacity={0.75} />);
+                            }
+                            return result;
+                          })()}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </SurfaceSection>
+              </div>
+            )}
 
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
               <SurfaceSection title="Diagnostics" subtitle="Generated from the same analysis rules used by the original app.">
@@ -2537,6 +2832,147 @@ function SettingsWorkspace({ snapshot, onSettingChange, onSnapshotRefresh, searc
   );
 }
 
+function CompareWorkspace({ garageLogs }) {
+  const [leftId, setLeftId] = useState('');
+  const [rightId, setRightId] = useState('');
+
+  const leftResult = useMemo(() => (leftId ? getLogResult(leftId)?.analysis : null), [leftId]);
+  const rightResult = useMemo(() => (rightId ? getLogResult(rightId)?.analysis : null), [rightId]);
+  const merged = useMemo(() => mergeCompareChartData(leftResult, rightResult), [leftResult, rightResult]);
+
+  const formatMetricLocal = (v, suffix = '', d = 1) => (Number.isFinite(Number(v)) ? `${Number(v).toFixed(d)}${suffix}` : '—');
+
+  const metricDiff = (a, b) => {
+    if (!Number.isFinite(Number(a)) || !Number.isFinite(Number(b))) return null;
+    const diff = Number(b) - Number(a);
+    return { diff, positive: diff > 0, label: `${diff > 0 ? '+' : ''}${diff.toFixed(1)}` };
+  };
+
+  const metrics = leftResult && rightResult ? [
+    { label: 'Status', left: leftResult.status, right: rightResult.status },
+    { label: 'AFR', left: formatMetricLocal(leftResult.metrics?.afr?.actual, ':1', 2), right: formatMetricLocal(rightResult.metrics?.afr?.actual, ':1', 2) },
+    { label: 'HPFP drop', left: formatMetricLocal(leftResult.metrics?.hpfp?.max_drop_pct, '%'), right: formatMetricLocal(rightResult.metrics?.hpfp?.max_drop_pct, '%'), diff: metricDiff(leftResult.metrics?.hpfp?.max_drop_pct, rightResult.metrics?.hpfp?.max_drop_pct) },
+    { label: 'IAT peak', left: formatMetricLocal(leftResult.metrics?.iat?.peak_f, 'F', 0), right: formatMetricLocal(rightResult.metrics?.iat?.peak_f, 'F', 0) },
+    { label: 'Timing pull', left: formatMetricLocal(leftResult.metrics?.timingCorrections?.max_correction, ' deg'), right: formatMetricLocal(rightResult.metrics?.timingCorrections?.max_correction, ' deg'), diff: metricDiff(leftResult.metrics?.timingCorrections?.max_correction, rightResult.metrics?.timingCorrections?.max_correction) },
+    { label: 'Health score', left: formatMetricLocal(leftResult.healthScore, '%', 0), right: formatMetricLocal(rightResult.healthScore, '%', 0), diff: metricDiff(leftResult.healthScore, rightResult.healthScore) },
+  ] : [];
+
+  return (
+    <motion.div variants={itemVariants} className="flex-1 overflow-auto bg-[var(--bg-page)] px-6 py-[22px]">
+      <div className="space-y-6 max-w-[1200px]">
+        <div className="grid grid-cols-2 gap-4">
+          <SurfaceSection title="Log A (baseline)" subtitle="Select a garage log to use as the reference.">
+            <StudioSelect value={leftId} onChange={(e) => setLeftId(e.target.value)}>
+              <option value="">Select log…</option>
+              {garageLogs.map((log) => (
+                <option key={log.id} value={log.id}>{log.filename} — {log.engine} {log.tune}</option>
+              ))}
+            </StudioSelect>
+          </SurfaceSection>
+          <SurfaceSection title="Log B (compare)" subtitle="Select a garage log to compare against the baseline.">
+            <StudioSelect value={rightId} onChange={(e) => setRightId(e.target.value)}>
+              <option value="">Select log…</option>
+              {garageLogs.map((log) => (
+                <option key={log.id} value={log.id}>{log.filename} — {log.engine} {log.tune}</option>
+              ))}
+            </StudioSelect>
+          </SurfaceSection>
+        </div>
+
+        {!leftResult && !rightResult ? (
+          <EmptyState
+            icon={ArrowUpDown}
+            title="Select two logs to compare"
+            body="Pick a baseline log and a comparison log above. Ethos will overlay their charts and surface metric deltas side-by-side."
+            actionLabel={null}
+          />
+        ) : null}
+
+        {leftResult && rightResult ? (
+          <>
+            {/* Metric comparison table */}
+            <SurfaceSection title="Metric delta" subtitle="Side-by-side comparison of key performance indicators.">
+              <div className="overflow-x-auto">
+                <table className="w-full text-[12px]">
+                  <thead>
+                    <tr className="border-b border-[var(--border)]">
+                      <th className="py-2 pr-4 text-left font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">Metric</th>
+                      <th className="py-2 px-4 text-right font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">
+                        A — {leftResult.filename?.replace(/\.csv$/i, '') || 'Log A'}
+                      </th>
+                      <th className="py-2 px-4 text-right font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">
+                        B — {rightResult.filename?.replace(/\.csv$/i, '') || 'Log B'}
+                      </th>
+                      <th className="py-2 pl-4 text-right font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">Δ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--border)]">
+                    {metrics.map((m) => (
+                      <tr key={m.label}>
+                        <td className="py-2.5 pr-4 text-[var(--text-secondary)]">{m.label}</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-[var(--text-primary)]">{m.left}</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-[var(--text-primary)]">{m.right}</td>
+                        <td className="py-2.5 pl-4 text-right font-mono">
+                          {m.diff ? (
+                            <span className={m.diff.diff > 0 ? 'text-[var(--success-text)]' : 'text-[var(--danger-text)]'}>
+                              {m.diff.label}
+                            </span>
+                          ) : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </SurfaceSection>
+
+            {/* Overlay chart */}
+            {merged.length > 0 && (
+              <SurfaceSection title="AFR and boost overlay" subtitle="Solid = Log A, dashed = Log B.">
+                <div className="h-[320px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={merged}>
+                      <CartesianGrid stroke="var(--border)" vertical={false} />
+                      <XAxis dataKey="time" tick={{ fontSize: 10, fill: 'var(--text-muted)', fontFamily: 'DM Mono' }} />
+                      <YAxis yAxisId="afr" tick={{ fontSize: 10, fill: 'var(--text-muted)', fontFamily: 'DM Mono' }} width={38} />
+                      <YAxis yAxisId="boost" orientation="right" tick={{ fontSize: 10, fill: 'var(--text-muted)', fontFamily: 'DM Mono' }} width={38} />
+                      <Tooltip content={<TelemetryTooltip />} />
+                      <Line yAxisId="afr" type="monotone" dataKey="afrActual" name="AFR (A)" stroke="var(--text-primary)" dot={false} strokeWidth={1.6} />
+                      <Line yAxisId="afr" type="monotone" dataKey="afrActual_b" name="AFR (B)" stroke="#9a958e" dot={false} strokeWidth={1.2} strokeDasharray="4 3" />
+                      <Line yAxisId="boost" type="monotone" dataKey="boost" name="Boost (A)" stroke="#c97f22" dot={false} strokeWidth={1.6} />
+                      <Line yAxisId="boost" type="monotone" dataKey="boost_b" name="Boost (B)" stroke="#e8c97a" dot={false} strokeWidth={1.2} strokeDasharray="4 3" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </SurfaceSection>
+            )}
+
+            {/* HPFP comparison */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {[{ result: leftResult, label: 'A' }, { result: rightResult, label: 'B' }].map(({ result: r, label }) => (
+                <SurfaceSection key={label} title={`HPFP trace — Log ${label}`} subtitle={r.filename || ''}>
+                  <div className="h-[200px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={r.chartData}>
+                        <CartesianGrid stroke="var(--border)" vertical={false} />
+                        <XAxis dataKey="time" tick={{ fontSize: 9, fill: 'var(--text-muted)', fontFamily: 'DM Mono' }} />
+                        <YAxis tick={{ fontSize: 9, fill: 'var(--text-muted)', fontFamily: 'DM Mono' }} width={38} />
+                        <Tooltip content={<TelemetryTooltip />} />
+                        <Area type="monotone" dataKey="hpfpTarget" name="Target" stroke="#c6a75a" fill="rgba(232,201,122,0.12)" strokeWidth={1.2} />
+                        <Area type="monotone" dataKey="hpfpActual" name="Actual" stroke="var(--text-primary)" fill="var(--selection)" strokeWidth={1.4} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </SurfaceSection>
+              ))}
+            </div>
+          </>
+        ) : null}
+      </div>
+    </motion.div>
+  );
+}
+
 export default function Dashboard() {
   const [activeView, setActiveView] = useState('dashboard');
   const [searchQuery, setSearchQuery] = useState('');
@@ -2754,6 +3190,8 @@ export default function Dashboard() {
             onOpenAnalysis={openAnalysisFromId}
             onOpenGarage={openAnalysisFromId}
             onOpenCalculator={() => setActiveView('calculator')}
+            onSetActiveView={setActiveView}
+            onCarProfilesChange={refreshSnapshot}
           />
         ) : null}
 
@@ -2770,6 +3208,7 @@ export default function Dashboard() {
               setViewerSource({ csvText: analysisState.csvText, filename: analysisState.analysis?.filename || 'analyzed-log.csv' });
               startTransition(() => setActiveView('viewer'));
             }}
+            onOpenCalculator={() => startTransition(() => setActiveView('calculator'))}
             searchQuery={searchQuery}
             filterActive={filterActive}
           />
@@ -2818,6 +3257,10 @@ export default function Dashboard() {
             onOpenViewer={openViewerFromId}
             carProfiles={getCarProfiles()}
           />
+        ) : null}
+
+        {activeView === 'compare' ? (
+          <CompareWorkspace garageLogs={snapshot.garageLogs} />
         ) : null}
 
         {activeView === 'updates' ? (
