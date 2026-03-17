@@ -2279,7 +2279,7 @@ function ArchiveWorkspace({ snapshot, onSnapshotRefresh, searchQuery, filterActi
     <motion.div variants={itemVariants} className="flex-1 overflow-auto bg-[var(--bg-page)] px-6 py-[22px]">
       <div className="space-y-4">
         <SurfaceSection
-          title="Garage archive"
+          title="Log archive"
           subtitle="Long-term archive with reopen, tag, note, backup, and import flows restored."
           action={(
             <div className="flex flex-wrap items-center gap-2">
