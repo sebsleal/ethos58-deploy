@@ -494,6 +494,8 @@ const Calculator = () => {
           setPumpEthanol={setPumpEthanol}
           resultVolumeUnit={resultVolumeUnit}
           handleResultVolumeUnitChange={handleResultVolumeUnitChange}
+          volumeUnit={volumeUnit}
+          handleVolumeUnitChange={handleVolumeUnitChange}
           volumeLabel={volumeLabel}
           tankCapacityLabel={tankCapacityLabel}
           formData={formData}
@@ -512,6 +514,8 @@ const Calculator = () => {
 
       {mode === 'refuel' && (
         <RefuelPane
+          volumeUnit={volumeUnit}
+          handleVolumeUnitChange={handleVolumeUnitChange}
           volumeLabel={volumeLabel}
           formData={formData}
           toDisplayVolume={toDisplayVolume}
@@ -538,7 +542,7 @@ const Calculator = () => {
               <p className="text-sm text-slate-500 dark:text-gray-400">These are the core values Fuel Planner uses. Set them here first so cost comparisons and trip plans are based on the right tank state.</p>
               <div className="mt-4 rounded-2xl border border-brand-200/70 dark:border-brand-500/20 bg-brand-50/70 dark:bg-brand-500/5 p-4 space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <InputGroup label={`Fuel Currently In Tank (${volumeLabel})`} name="currentFuel" value={toDisplayVolume(formData.currentFuel)} onChange={handleChange} step="0.1" helpText="How much fuel is in the car right now before you start filling." />
+                  <CurrentFuelInput value={toDisplayVolume(formData.currentFuel)} onChange={handleChange} unit={volumeUnit} onUnitChange={handleVolumeUnitChange} unitLabel={volumeLabel} helpText="How much fuel is in the car right now before you start filling." />
                   <InputGroup label="Current Ethanol %" name="currentE" value={formData.currentE} onChange={handleChange} step="1" helpText="Use the blend you estimate is currently in the tank, like E10 or E30." />
                   <InputGroup label="Target Ethanol %" name="targetE" value={formData.targetE} onChange={handleChange} step="1" helpText="The final blend you want to end up with after the fill." />
                   <TankCapacityInput
@@ -694,7 +698,7 @@ const Calculator = () => {
   );
 };
 
-const BlendPane = ({ precisionMode, setPrecisionMode, pumpOctane, setPumpOctane, pumpEthanol, setPumpEthanol, resultVolumeUnit, handleResultVolumeUnitChange, volumeLabel, tankCapacityLabel, formData, toDisplayVolume, toDisplayTankCapacity, handleChange, handleTankCapacityUnitChange, tankCapacityUnit, calculate, error, result, formatResultVolume, resultVolumeLabel }) => (
+const BlendPane = ({ precisionMode, setPrecisionMode, pumpOctane, setPumpOctane, pumpEthanol, setPumpEthanol, resultVolumeUnit, handleResultVolumeUnitChange, volumeUnit, handleVolumeUnitChange, volumeLabel, tankCapacityLabel, formData, toDisplayVolume, toDisplayTankCapacity, handleChange, handleTankCapacityUnitChange, tankCapacityUnit, calculate, error, result, formatResultVolume, resultVolumeLabel }) => (
   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
     <div className="surface-card p-6">
       <div className="flex justify-between items-center mb-4 border-b border-slate-100 dark:border-white/5 pb-4">
@@ -742,7 +746,7 @@ const BlendPane = ({ precisionMode, setPrecisionMode, pumpOctane, setPumpOctane,
         </div>
       </div>
       <div className="space-y-5">
-        <InputGroup label={`Current Fuel in Tank (${volumeLabel})`} name="currentFuel" value={toDisplayVolume(formData.currentFuel)} onChange={handleChange} step="0.1" />
+        <CurrentFuelInput value={toDisplayVolume(formData.currentFuel)} onChange={handleChange} unit={volumeUnit} onUnitChange={handleVolumeUnitChange} unitLabel={volumeLabel} />
         <InputGroup label="Current Ethanol %" name="currentE" value={formData.currentE} onChange={handleChange} step="1" />
         <InputGroup label="Target Ethanol %" name="targetE" value={formData.targetE} onChange={handleChange} step="1" />
         <TankCapacityInput
@@ -784,13 +788,13 @@ const BlendPane = ({ precisionMode, setPrecisionMode, pumpOctane, setPumpOctane,
   </div>
 );
 
-const RefuelPane = ({ volumeLabel, formData, toDisplayVolume, handleChange, refuelGallons, setRefuelGallons, refuelAddLabel, refuelAddUnit, handleRefuelAddUnitChange, toDisplayRefuelVolume, fromDisplayRefuelVolume, refuelPumpEthanol, setRefuelPumpEthanol, calcRefuel, refuelResult }) => (
+const RefuelPane = ({ volumeUnit, handleVolumeUnitChange, volumeLabel, formData, toDisplayVolume, handleChange, refuelGallons, setRefuelGallons, refuelAddLabel, refuelAddUnit, handleRefuelAddUnitChange, toDisplayRefuelVolume, fromDisplayRefuelVolume, refuelPumpEthanol, setRefuelPumpEthanol, calcRefuel, refuelResult }) => (
   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
     <div className="surface-card p-6">
       <h2 className="text-base font-bold text-slate-900 dark:text-gray-100 mb-4 border-b border-slate-100 dark:border-white/5 pb-4">Refuel Planner</h2>
       <p className="text-sm text-slate-500 dark:text-gray-400 mb-6">"I'm adding X gallons at the pump — what will my blend be?"</p>
       <div className="space-y-5">
-        <InputGroup label={`Current Fuel in Tank (${volumeLabel})`} name="currentFuel" value={toDisplayVolume(formData.currentFuel)} onChange={handleChange} step="0.1" />
+        <CurrentFuelInput value={toDisplayVolume(formData.currentFuel)} onChange={handleChange} unit={volumeUnit} onUnitChange={handleVolumeUnitChange} unitLabel={volumeLabel} />
         <InputGroup label="Current Ethanol %" name="currentE" value={formData.currentE} onChange={handleChange} step="1" />
         <div>
           <div className="flex items-center justify-between gap-3 mb-1.5">
@@ -882,6 +886,34 @@ const TankCapacityInput = ({ value, onChange, unit, onUnitChange, unitLabel, hel
       </div>
     </div>
     <input type="number" name="tankSize" value={value} onChange={onChange} step="0.1" className="app-input w-full px-4 py-2.5 text-sm" placeholder="0.0" />
+    {helpText && <p className="mt-1.5 text-xs text-slate-500 dark:text-gray-400">{helpText}</p>}
+  </div>
+);
+
+const CurrentFuelInput = ({ value, onChange, unit, onUnitChange, unitLabel, helpText = null }) => (
+  <div>
+    <div className="flex items-center justify-between gap-3 mb-1.5">
+      <label className="block text-xs font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wide">Current Fuel in Tank ({unitLabel})</label>
+      <div className="flex rounded-lg border border-slate-200 dark:border-white/10 overflow-hidden">
+        <button
+          type="button"
+          onClick={() => onUnitChange('gal')}
+          className={`px-3 py-1 text-[11px] font-bold transition-colors ${unit === 'gal' ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-white dark:bg-zinc-950 text-slate-500 dark:text-gray-400 hover:bg-slate-50'}`}
+          aria-pressed={unit === 'gal'}
+        >
+          Gallons
+        </button>
+        <button
+          type="button"
+          onClick={() => onUnitChange('L')}
+          className={`px-3 py-1 text-[11px] font-bold transition-colors ${unit === 'L' ? 'bg-slate-900 dark:bg-brand-500 text-white' : 'bg-white dark:bg-zinc-950 text-slate-500 dark:text-gray-400 hover:bg-slate-50'}`}
+          aria-pressed={unit === 'L'}
+        >
+          Litres
+        </button>
+      </div>
+    </div>
+    <input type="number" name="currentFuel" value={value} onChange={onChange} step="0.1" className="app-input w-full px-4 py-2.5 text-sm" placeholder="0.0" />
     {helpText && <p className="mt-1.5 text-xs text-slate-500 dark:text-gray-400">{helpText}</p>}
   </div>
 );

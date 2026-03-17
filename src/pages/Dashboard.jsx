@@ -1643,14 +1643,14 @@ function ViewerWorkspace({ viewerData, selectedChannels, onToggleChannel, onSetC
 function CalculatorWorkspace({ snapshot, onSnapshotRefresh, searchQuery }) {
   const [mode, setMode] = useState('blend');
   const [form, setForm] = useState({
-    currentFuel: snapshot.activeBlend?.currentFuel ?? 5,
-    currentE: snapshot.activeBlend?.currentE ?? 10,
-    targetE: snapshot.activeBlend?.resultingBlend ?? 40,
-    tankSize: 13.7,
-    pumpEthanol: snapshot.activeBlend?.pumpEthanol ?? 10,
-    pumpOctane: snapshot.activeBlend?.pumpOctane ?? 93,
+    currentFuel: snapshot.activeBlend?.currentFuel ?? '',
+    currentE: snapshot.activeBlend?.currentE ?? '',
+    targetE: snapshot.activeBlend?.resultingBlend ?? '',
+    tankSize: '',
+    pumpEthanol: snapshot.activeBlend?.pumpEthanol ?? '',
+    pumpOctane: snapshot.activeBlend?.pumpOctane ?? '',
     precisionMode: false,
-    addFuel: 3,
+    addFuel: '',
     calibrationReadings: '72, 74, 76',
     e85Price: 3.19,
     pumpPrice: 4.29,
@@ -1664,6 +1664,7 @@ function CalculatorWorkspace({ snapshot, onSnapshotRefresh, searchQuery }) {
   const [costResult, setCostResult] = useState(null);
   const [tankPlan, setTankPlan] = useState([]);
   const [error, setError] = useState(null);
+  const [currentFuelUnit, setCurrentFuelUnit] = useState(() => (snapshot.settings.units === 'Metric' ? 'L' : 'gal'));
   const units = snapshot.settings.units;
   const filteredSearch = searchQuery.trim().toLowerCase();
 
@@ -1799,31 +1800,51 @@ function CalculatorWorkspace({ snapshot, onSnapshotRefresh, searchQuery }) {
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
           <SurfaceSection title="Fuel math" subtitle="The original blend utilities are now routed through the redesigned shell.">
             <div className="grid gap-3 md:grid-cols-2">
-              <FieldShell label={`Current fuel (${units === 'Metric' ? 'L' : 'gal'})`}>
+              <div className="block">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">Current fuel ({currentFuelUnit === 'L' ? 'ltr' : 'gal'})</span>
+                  <div className="flex gap-1">
+                    {[['gal', 'gal'], ['L', 'ltr']].map(([u, label]) => (
+                      <button
+                        key={u}
+                        type="button"
+                        onClick={() => setCurrentFuelUnit(u)}
+                        className={`w-8 rounded-[6px] border py-0.5 text-center font-mono text-[9px] uppercase tracking-[0.05em] transition-colors ${currentFuelUnit === u ? 'border-[var(--text-primary)] bg-[var(--bg-surface)] text-[var(--text-primary)]' : 'border-[var(--border)] bg-transparent text-[var(--text-muted)]'}`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <StudioInput
                   type="number"
-                  value={toDisplayVolume(form.currentFuel, units)}
-                  onChange={(event) => setField('currentFuel', fromDisplayVolume(event.target.value, units))}
+                  value={form.currentFuel === '' ? '' : currentFuelUnit === 'L' ? roundTo(Number(form.currentFuel) * LITERS_PER_GALLON, 2) : roundTo(Number(form.currentFuel), 2)}
+                  onChange={(event) => {
+                    const v = event.target.value;
+                    if (v === '') { setField('currentFuel', ''); return; }
+                    const parsed = Number(v);
+                    setField('currentFuel', Number.isNaN(parsed) ? '' : currentFuelUnit === 'L' ? parsed / LITERS_PER_GALLON : parsed);
+                  }}
                 />
-              </FieldShell>
+              </div>
               <FieldShell label="Current ethanol (%)">
-                <StudioInput type="number" value={form.currentE} onChange={(event) => setField('currentE', Number(event.target.value))} />
+                <StudioInput type="number" value={form.currentE} onChange={(event) => setField('currentE', event.target.value === '' ? '' : Number(event.target.value))} />
               </FieldShell>
               <FieldShell label="Target ethanol (%)">
-                <StudioInput type="number" value={form.targetE} onChange={(event) => setField('targetE', Number(event.target.value))} />
+                <StudioInput type="number" value={form.targetE} onChange={(event) => setField('targetE', event.target.value === '' ? '' : Number(event.target.value))} />
               </FieldShell>
               <FieldShell label={`Tank size (${units === 'Metric' ? 'L' : 'gal'})`}>
                 <StudioInput
                   type="number"
-                  value={toDisplayVolume(form.tankSize, units)}
-                  onChange={(event) => setField('tankSize', fromDisplayVolume(event.target.value, units))}
+                  value={form.tankSize === '' ? '' : toDisplayVolume(form.tankSize, units)}
+                  onChange={(event) => setField('tankSize', event.target.value === '' ? '' : fromDisplayVolume(event.target.value, units))}
                 />
               </FieldShell>
               <FieldShell label="Pump ethanol (%)">
-                <StudioInput type="number" value={form.pumpEthanol} onChange={(event) => setField('pumpEthanol', Number(event.target.value))} />
+                <StudioInput type="number" value={form.pumpEthanol} onChange={(event) => setField('pumpEthanol', event.target.value === '' ? '' : Number(event.target.value))} />
               </FieldShell>
               <FieldShell label="Pump octane">
-                <StudioInput type="number" value={form.pumpOctane} onChange={(event) => setField('pumpOctane', Number(event.target.value))} />
+                <StudioInput type="number" value={form.pumpOctane} onChange={(event) => setField('pumpOctane', event.target.value === '' ? '' : Number(event.target.value))} />
               </FieldShell>
             </div>
 
@@ -1855,8 +1876,8 @@ function CalculatorWorkspace({ snapshot, onSnapshotRefresh, searchQuery }) {
                 <FieldShell label={`Fuel to add (${units === 'Metric' ? 'L' : 'gal'})`}>
                   <StudioInput
                     type="number"
-                    value={toDisplayVolume(form.addFuel, units)}
-                    onChange={(event) => setField('addFuel', fromDisplayVolume(event.target.value, units))}
+                    value={form.addFuel === '' ? '' : toDisplayVolume(form.addFuel, units)}
+                    onChange={(event) => setField('addFuel', event.target.value === '' ? '' : fromDisplayVolume(event.target.value, units))}
                   />
                 </FieldShell>
                 <button type="button" onClick={handleRefuel} className="rounded-[8px] bg-[var(--text-primary)] px-4 py-2 text-[12px] font-medium text-[var(--bg-page)]">
