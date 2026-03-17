@@ -307,6 +307,7 @@ const Calculator = () => {
     setProfiles(getBlendProfiles());
     setProfileName('');
     setShowProfileSave(false);
+    hapticSuccess();
     toast(`Profile "${profileName.trim()}" saved.`, { variant: 'success' });
   };
 
