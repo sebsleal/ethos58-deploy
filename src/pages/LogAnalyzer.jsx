@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import {
   UploadCloud, Activity, AlertTriangle, CheckCircle, BarChart2, XCircle,
-  Lightbulb, Info, Download, GitCompare, MessageSquarePlus, Tag, Cpu, TrendingDown,
+  Lightbulb, Info, Download, GitCompare, MessageSquarePlus, Tag, Cpu, TrendingDown, FileText,
 } from 'lucide-react';
 import { analyzeLog } from '../utils/logAnalyzer';
 import { saveRecentLog, saveGarageLog, getAnnotations, saveAnnotations } from '../utils/storage';
@@ -19,6 +19,12 @@ import {
 const ETHANOL_OPTIONS = [0, 10, 30, 40, 50, 85];
 const ENGINE_OPTIONS = ['B58 Gen1', 'B58 Gen2', 'S58', 'S55', 'N55', 'N54', 'N20/N26', 'B48', 'N63/S63', 'Other'];
 const TUNE_OPTIONS = ['Stage 1', 'Stage 2', 'Stage 2+', 'Custom E-tune'];
+const TUNE_PRESETS = {
+  'Stage 1': { hpfpDropWarn: 10, hpfpDropRisk: 20, timingWarn: -3, timingRisk: -5 },
+  'Stage 2': { hpfpDropWarn: 8, hpfpDropRisk: 18, timingWarn: -2.5, timingRisk: -4.5 },
+  'Stage 2+': { hpfpDropWarn: 7, hpfpDropRisk: 16, timingWarn: -2, timingRisk: -4 },
+  'Custom E-tune': { hpfpDropWarn: 6, hpfpDropRisk: 15, timingWarn: -2, timingRisk: -4 },
+};
 const FORMAT_COLOR = {
   BM3: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
   MHD: 'text-purple-400 bg-purple-500/10 border-purple-500/20',
@@ -70,6 +76,7 @@ const LogAnalyzer = () => {
   const nextRequestIdRef = useRef(1);
   const unitPref = localStorage.getItem('ethos_units') || 'US';
   const chartRef = useRef(null);
+  const reportCardRef = useRef(null);
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
 
@@ -186,7 +193,17 @@ const LogAnalyzer = () => {
     for (const file of csvFiles) {
       try {
         const csvText = await readFileAsText(file);
-        const result = await analyzeViaWorker(csvText, file.name, carDetails);
+        const raw = await analyzeViaWorker(csvText, file.name, carDetails);
+        const preset = TUNE_PRESETS[carDetails.tuneStage];
+        const result = !preset ? raw : (() => {
+          const next = structuredClone(raw);
+          const drop = Number(next?.metrics?.hpfp?.max_drop_pct);
+          if (Number.isFinite(drop)) {
+            if (drop >= preset.hpfpDropRisk) next.metrics.hpfp.status = 'Risk';
+            else if (drop >= preset.hpfpDropWarn && next.metrics.hpfp.status === 'Safe') next.metrics.hpfp.status = 'Caution';
+          }
+          return next;
+        })();
         if (!mountedRef.current) return;
         saveRecentLog(result);
         lastResult = result;
@@ -224,7 +241,24 @@ const LogAnalyzer = () => {
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
-        const result = await analyzeViaWorker(e.target.result, file.name, carDetails);
+        const raw = await analyzeViaWorker(e.target.result, file.name, carDetails);
+        const preset = TUNE_PRESETS[carDetails.tuneStage];
+        const result = !preset ? raw : (() => {
+          const next = structuredClone(raw);
+          const drop = Number(next?.metrics?.hpfp?.max_drop_pct);
+          if (Number.isFinite(drop)) {
+            if (drop >= preset.hpfpDropRisk) next.metrics.hpfp.status = 'Risk';
+            else if (drop >= preset.hpfpDropWarn && next.metrics.hpfp.status === 'Safe') next.metrics.hpfp.status = 'Caution';
+          }
+          const correction = Number(next?.metrics?.timingCorrections?.max_correction);
+          if (Number.isFinite(correction)) {
+            if (correction <= preset.timingRisk) next.metrics.timingCorrections.status = 'Risk';
+            else if (correction <= preset.timingWarn && next.metrics.timingCorrections.status === 'Safe') next.metrics.timingCorrections.status = 'Caution';
+          }
+          const statuses = [next.metrics?.afr?.status, next.metrics?.hpfp?.status, next.metrics?.iat?.status, next.metrics?.timingCorrections?.status];
+          next.status = statuses.includes('Risk') ? 'Risk' : statuses.includes('Caution') ? 'Caution' : 'Safe';
+          return next;
+        })();
         if (!mountedRef.current) return;
         if (isCompare) {
           setCompareAnalysis(result);
@@ -329,6 +363,41 @@ const LogAnalyzer = () => {
       });
       console.error('Export failed:', err);
     }
+  };
+
+  const exportHealthReportCard = async () => {
+    if (!reportCardRef.current || !analysis) return;
+    try {
+      const { default: html2canvas } = await import('html2canvas');
+      const canvas = await html2canvas(reportCardRef.current, { backgroundColor: '#09090B', scale: 2 });
+      const fileName = `ethos58-health-report-${analysis?.filename?.replace('.csv', '') || 'log'}.png`;
+      const dataUrl = canvas.toDataURL('image/png');
+
+      if (Capacitor.isNativePlatform()) {
+        const [{ Filesystem, Directory }, { Share }] = await Promise.all([
+          import('@capacitor/filesystem'),
+          import('@capacitor/share'),
+        ]);
+        const base64 = dataUrl.split(',')[1];
+        const saved = await Filesystem.writeFile({ path: fileName, data: base64, directory: Directory.Cache, recursive: true });
+        await Share.share({ title: 'Ethos58 Health Report', text: 'Log analysis report card', url: saved.uri, dialogTitle: 'Share health report' });
+        return;
+      }
+
+      const link = document.createElement('a');
+      link.download = fileName;
+      link.href = dataUrl;
+      link.click();
+    } catch (err) {
+      trackExportFailure(err, { format: 'png_report_card', filename: analysis?.filename });
+    }
+  };
+
+  const exportPdf = () => {
+    if (!analysis) return;
+    document.body.classList.add('print-health-report');
+    window.print();
+    window.setTimeout(() => document.body.classList.remove('print-health-report'), 200);
   };
 
   const handleChartClick = (data) => {
@@ -496,6 +565,9 @@ const LogAnalyzer = () => {
                   <option value="">Select</option>
                   {TUNE_OPTIONS.map(o => <option key={o}>{o}</option>)}
                 </select>
+                {carDetails.tuneStage && TUNE_PRESETS[carDetails.tuneStage] && (
+                  <p className="mt-1.5 text-[11px] app-muted">Preset thresholds active for {carDetails.tuneStage}.</p>
+                )}
               </div>
               <div>
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide app-muted">Fuel Mix</label>
@@ -576,12 +648,44 @@ const LogAnalyzer = () => {
             </div>
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div ref={reportCardRef} className="print-health-card grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <MetricBox title="AFR (Air/Fuel)" value={analysis.metrics.afr.actual ?? '—'} target={analysis.metrics.afr.target ? `Target: ${analysis.metrics.afr.target}` : 'WOT avg'} status={analysis.metrics.afr.status} />
             <MetricBox title="HPFP" value={analysis.metrics.hpfp.actual != null ? `${analysis.metrics.hpfp.actual} psi` : '—'} target={analysis.metrics.hpfp.target != null ? `Target: ${analysis.metrics.hpfp.target} psi` : 'No data'} status={analysis.metrics.hpfp.status} />
             <MetricBox title="Intake Air Temp" value={analysis.metrics.iat.peak_f != null ? `${Math.round(unitPref === 'Metric' ? (analysis.metrics.iat.peak_f - 32) * 5 / 9 : analysis.metrics.iat.peak_f)}°${unitPref === 'Metric' ? 'C' : 'F'}` : '—'} target="Peak value" status={analysis.metrics.iat.status} />
             <MetricBox title="Timing Corrections" value={analysis.metrics.timingCorrections.max_correction != null ? `${analysis.metrics.timingCorrections.max_correction}°` : '—'} target={analysis.metrics.timingCorrections.cylinders} status={analysis.metrics.timingCorrections.status} />
           </div>
+
+          {compareAnalysis && (
+            <div className="surface-card p-4">
+              <h3 className="text-xs font-bold uppercase tracking-wide app-muted mb-3">Side-by-side diff view</h3>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="h-48">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={mergedChartData}>
+                      <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+                      <XAxis dataKey="time" />
+                      <YAxis />
+                      <Tooltip />
+                      <Line type="monotone" dataKey="afrActual" name="AFR A" stroke="#f59e0b" dot={false} strokeWidth={1.8} />
+                      <Line type="monotone" dataKey="afrActual_b" name="AFR B" stroke="#eab308" dot={false} strokeWidth={1.4} strokeDasharray="4 3" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="h-48">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={mergedChartData}>
+                      <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+                      <XAxis dataKey="time" />
+                      <YAxis />
+                      <Tooltip />
+                      <Line type="monotone" dataKey="boost" name="Boost A" stroke="#60a5fa" dot={false} strokeWidth={1.8} />
+                      <Line type="monotone" dataKey="boost_b" name="Boost B" stroke="#93c5fd" dot={false} strokeWidth={1.4} strokeDasharray="4 3" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-1 flex flex-col gap-4">
@@ -711,6 +815,12 @@ const LogAnalyzer = () => {
                 <div className="flex items-center gap-2">
                   <button onClick={exportPng} className="app-button-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium">
                     <Download size={13} /> PNG
+                  </button>
+                  <button onClick={exportHealthReportCard} className="app-button-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium">
+                    <FileText size={13} /> Report Card
+                  </button>
+                  <button onClick={exportPdf} className="app-button-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium">
+                    <Download size={13} /> PDF
                   </button>
                   <button onClick={() => setShowCompare(v => !v)}
                     className={`flex items-center gap-1.5 text-xs font-medium border px-3 py-1.5 rounded-[1.15rem] transition-colors ${showCompare ? 'text-brand-400 border-brand-500/30 bg-brand-500/5' : 'app-button-secondary'}`}

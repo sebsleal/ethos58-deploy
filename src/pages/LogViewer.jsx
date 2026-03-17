@@ -138,12 +138,18 @@ const LogViewer = () => {
   const [dragActive, setDragActive] = useState(false);
   const [search, setSearch] = useState('');
   const [settings] = useState(getSettings);
+  const [isParsing, setIsParsing] = useState(false);
   const maxPoints = DOWNSAMPLING_MAP[settings.downsampling] ?? 800;
   const lineWidth = LINE_WIDTH_MAP[settings.lineThickness] ?? 1.5;
 
   const processCsvText = useCallback((csvText, filename = 'Imported Log.csv') => {
+    setIsParsing(true);
+    window.setTimeout(() => {
     const parsed = parseViewerCsv(csvText);
-    if (!parsed) return;
+    if (!parsed) {
+      setIsParsing(false);
+      return;
+    }
     const { headers, rows } = parsed;
     const numericChannels = detectNumericChannels(headers, rows);
     const timeCol = detectTimeColumn(headers);
@@ -163,6 +169,8 @@ const LogViewer = () => {
     setFileData({ filename, rows: sampled, numericChannels, timeCol, stats, colors });
     setSelected(autoSel);
     setSearch('');
+    setIsParsing(false);
+    }, 0);
   }, [maxPoints]);
 
   const processFile = useCallback((file) => {
@@ -225,7 +233,7 @@ const LogViewer = () => {
   ), [fileData, search]);
 
   // ── Upload view ──────────────────────────────────────────────────────────────
-  if (!fileData) {
+  if (!fileData && !isParsing) {
     return (
       <div className="space-y-6 animate-fade-in p-8 md:p-12 max-w-6xl mx-auto h-full">
         <PageHeader
@@ -259,6 +267,28 @@ const LogViewer = () => {
             Browse Files
             <input type="file" className="hidden" accept=".csv,text/csv,text/plain" onChange={handleFileChange} />
           </label>
+        </div>
+      </div>
+    );
+  }
+
+  if (isParsing) {
+    return (
+      <div className="space-y-6 animate-fade-in p-8 md:p-12 max-w-6xl mx-auto h-full">
+        <PageHeader
+          eyebrow="Analysis"
+          title="Log Viewer"
+          description="Parsing your CSV and preparing channels for charting."
+        />
+        <div className="surface-card-strong p-6 md:p-8 space-y-5">
+          <div className="h-4 w-48 rounded bg-slate-200/70 dark:bg-white/10 animate-pulse" />
+          <div className="h-3 w-72 rounded bg-slate-200/70 dark:bg-white/10 animate-pulse" />
+          <div className="grid md:grid-cols-3 gap-4 pt-2">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="h-16 rounded-xl bg-slate-200/60 dark:bg-white/10 animate-pulse" />
+            ))}
+          </div>
+          <div className="h-[260px] rounded-2xl bg-slate-200/60 dark:bg-white/10 animate-pulse" />
         </div>
       </div>
     );
