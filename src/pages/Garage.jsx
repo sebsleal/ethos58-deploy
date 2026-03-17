@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Archive, Trash2, Search, FileJson, FileSpreadsheet, FileUp } from 'lucide-react';
 import {
@@ -11,6 +11,8 @@ import {
   importGarageBackup,
 } from '../utils/storage';
 import { InsetCard, PageHeader, StatusPill, SurfaceCard } from '../components/ui';
+import { hapticSuccess, hapticWarning } from '../utils/haptics';
+import { indexGarageLogsInSpotlight } from '../utils/iosNative';
 
 function downloadBlob(filename, content, type) {
   const blob = new Blob([content], { type });
@@ -41,6 +43,10 @@ const Garage = () => {
     const matchTag = tagFilter === 'all' || (log.tags || []).includes(tagFilter);
     return matchSearch && matchTag;
   }), [logs, search, tagFilter]);
+
+  useEffect(() => {
+    indexGarageLogsInSpotlight(logs);
+  }, [logs]);
 
   const onTagEdit = (id, raw) => {
     const tags = raw.split(',').map((t) => t.trim()).filter(Boolean);
@@ -82,6 +88,7 @@ const Garage = () => {
       const data = JSON.parse(text);
       importGarageBackup(data, 'merge');
       setLogs(getGarageLogs());
+      hapticSuccess();
     } catch (error) {
       setImportError(error instanceof Error ? error.message : 'Could not import that backup file.');
     }
@@ -123,6 +130,14 @@ const Garage = () => {
       </SurfaceCard>
 
       <div className="space-y-3">
+        {!logs.length && (
+          <SurfaceCard className="border-dashed text-center py-12">
+            <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-brand-500/10 text-3xl">🧰</div>
+            <h2 className="text-lg font-semibold app-heading">No logs in your garage yet</h2>
+            <p className="text-sm app-muted mt-2 max-w-md mx-auto">Analyze your first CSV in Log Analyzer and it will appear here automatically with health score, tags, and notes.</p>
+          </SurfaceCard>
+        )}
+
         {filtered.map((log) => (
           <SurfaceCard key={log.id}>
             <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -144,6 +159,7 @@ const Garage = () => {
                     if (!window.confirm(`Delete ${log.filename} from the garage?`)) return;
                     deleteGarageLog(log.id);
                     setLogs(getGarageLogs());
+                    hapticWarning();
                   }}
                   className="text-xs px-2.5 py-1.5 rounded-[1rem] border border-red-300/70 text-red-500 flex items-center gap-1"
                   aria-label={`Delete ${log.filename}`}
@@ -166,9 +182,9 @@ const Garage = () => {
             </div>
           </SurfaceCard>
         ))}
-        {!filtered.length && (
+        {!filtered.length && logs.length > 0 && (
           <SurfaceCard className="border-dashed text-center py-10">
-            <p className="text-sm app-muted">No garage logs found.</p>
+            <p className="text-sm app-muted">No garage logs match your current search/filter.</p>
           </SurfaceCard>
         )}
       </div>

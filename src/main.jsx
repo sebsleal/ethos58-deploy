@@ -4,6 +4,7 @@ import App from './App.jsx';
 import { ToastProvider } from './components/ui.jsx';
 import { initTelemetry } from './utils/telemetry';
 import './index.css';
+import './print.css';
 
 initTelemetry();
 
