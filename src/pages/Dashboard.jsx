@@ -1398,8 +1398,25 @@ function buildAfrHistogram(chartData) {
   }));
 }
 
-function AfrHistogram({ chartData, afrTarget }) {
+function AfrHistogram({ chartData }) {
   const bins = useMemo(() => buildAfrHistogram(chartData), [chartData]);
+
+  // Derive median logged target from per-row afrTarget values; fall back to distribution median
+  const resolvedTarget = useMemo(() => {
+    const targets = (chartData || [])
+      .map((r) => r.afrTarget)
+      .filter((v) => Number.isFinite(v) && v > 0);
+    if (targets.length) {
+      const sorted = [...targets].sort((a, b) => a - b);
+      return sorted[Math.floor(sorted.length / 2)];
+    }
+    // Fall back to the weighted center of the distribution
+    if (!bins.length) return null;
+    const totalCount = bins.reduce((s, b) => s + b.count, 0);
+    if (!totalCount) return null;
+    return bins.reduce((s, b) => s + b.afr * b.count, 0) / totalCount;
+  }, [chartData, bins]);
+
   if (!bins.length) return null;
 
   return (
@@ -1416,18 +1433,23 @@ function AfrHistogram({ chartData, afrTarget }) {
               <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 shadow-[0_12px_24px_rgba(0,0,0,0.08)]">
                 <p className="font-mono text-[10px] text-[var(--text-muted)]">AFR {d.afr.toFixed(2)}</p>
                 <p className="font-mono text-[11px] text-[var(--text-primary)]">{d.count} samples</p>
+                {resolvedTarget && (
+                  <p className="font-mono text-[10px] text-[var(--text-muted)]">
+                    {(d.afr - resolvedTarget) > 0 ? '+' : ''}{(d.afr - resolvedTarget).toFixed(2)} vs target
+                  </p>
+                )}
               </div>
             );
           }}
         />
         <Bar dataKey="count" radius={[2, 2, 0, 0]}>
           {bins.map((b) => {
-            const diff = afrTarget ? b.afr - afrTarget : 0;
-            const color = !afrTarget ? 'var(--text-primary)'
+            const diff = resolvedTarget != null ? b.afr - resolvedTarget : 0;
+            const color = resolvedTarget == null ? 'var(--text-secondary)'
               : Math.abs(diff) <= 0.25 ? 'var(--success-text)'
               : diff < -0.5 || diff > 0.75 ? 'var(--danger-text)'
               : 'var(--warn-text)';
-            return <Cell key={b.label} fill={color} fillOpacity={0.75} />;
+            return <Cell key={b.label} fill={color} fillOpacity={0.8} />;
           })}
         </Bar>
       </BarChart>
@@ -1628,7 +1650,7 @@ function AnalyzerWorkspace({
                   subtitle="Sample count per AFR bucket. Green = near target, amber = drift, red = out of bounds."
                 >
                   <div className="h-[200px]">
-                    <AfrHistogram chartData={analysis.chartData} afrTarget={analysis.metrics?.afr?.target} />
+                    <AfrHistogram chartData={analysis.chartData} />
                   </div>
                 </SurfaceSection>
 
