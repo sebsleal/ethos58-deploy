@@ -16,7 +16,8 @@
       { "type": "improved", "platform": "both", "text": "Analyzer loading state replaced with a skeleton shimmer layout that mirrors the results structure, reducing perceived wait time" },
       { "type": "improved", "platform": "both", "text": "Empty kanban columns now show contextual empty states with action buttons instead of generic placeholder text" },
       { "type": "improved", "platform": "both", "text": "CSS token system expanded with spacing, border-radius, shadow, and transition-duration variables for consistent styling across the app" },
-      { "type": "improved", "platform": "both", "text": "Interactive card hover/active states and standardized focus ring and disabled styles added globally" }
+      { "type": "improved", "platform": "both", "text": "Interactive card hover/active states and standardized focus ring and disabled styles added globally" },
+      { "type": "fixed", "platform": "both", "text": "Compare Logs delta column now colors correctly for lower-is-better metrics — HPFP drop, IAT peak, and timing pull show red when the value increases (worse) and green when it decreases (better)" }
     ]
   },
   {
