@@ -25,6 +25,29 @@ const KEYS = {
 
 const MAX_RECENT_LOGS = 10;
 
+function isQuotaError(error) {
+  if (!error) return false;
+  return error?.name === 'QuotaExceededError' || error?.code === 22;
+}
+
+function safeSetItem(key, value, onQuotaExceeded) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (error) {
+    if (isQuotaError(error) && typeof onQuotaExceeded === 'function') {
+      onQuotaExceeded();
+      try {
+        localStorage.setItem(key, value);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+}
+
 // ─── Recent Logs ─────────────────────────────────────────────────────────────
 
 export function getRecentLogs() {
@@ -64,14 +87,10 @@ export function saveRecentLog(analysis) {
   oldLogs.forEach(l => localStorage.removeItem(`${KEYS.LOG_RESULTS}_${l.id}`));
 
   const updated = [entry, ...logs].slice(0, MAX_RECENT_LOGS);
-  localStorage.setItem(KEYS.RECENT_LOGS, JSON.stringify(updated));
+  safeSetItem(KEYS.RECENT_LOGS, JSON.stringify(updated));
 
   // Store full analysis result keyed by ID so it can be reopened
-  try {
-    localStorage.setItem(`${KEYS.LOG_RESULTS}_${id}`, JSON.stringify({ analysis, csvText: null }));
-  } catch {
-    // localStorage quota exceeded — skip full result storage
-  }
+  safeSetItem(`${KEYS.LOG_RESULTS}_${id}`, JSON.stringify({ analysis, csvText: null }));
 
   return updated;
 }
@@ -86,7 +105,7 @@ function getGarageIndex() {
 }
 
 function saveGarageIndex(entries) {
-  localStorage.setItem(KEYS.LOG_GARAGE, JSON.stringify(entries));
+  safeSetItem(KEYS.LOG_GARAGE, JSON.stringify(entries));
 }
 
 export function getGarageLogs() {
@@ -119,11 +138,14 @@ export function saveGarageLog(analysis, csvText = null) {
   const current = getGarageIndex();
   saveGarageIndex([entry, ...current]);
 
-  try {
-    localStorage.setItem(`${KEYS.LOG_RESULTS}_${id}`, JSON.stringify({ analysis, csvText }));
-  } catch {
-    // localStorage quota exceeded — skip full payload storage
-  }
+  safeSetItem(
+    `${KEYS.LOG_RESULTS}_${id}`,
+    JSON.stringify({ analysis, csvText }),
+    () => {
+      const oldGarage = getGarageIndex().slice(25);
+      oldGarage.forEach((item) => localStorage.removeItem(`${KEYS.LOG_RESULTS}_${item.id}`));
+    },
+  );
 
   return entry;
 }
@@ -187,7 +209,7 @@ export function importGarageBackup(data, mode = 'merge') {
     importedEntries.push(entry);
 
     if (log.full) {
-      localStorage.setItem(`${KEYS.LOG_RESULTS}_${nextId}`, JSON.stringify(log.full));
+      safeSetItem(`${KEYS.LOG_RESULTS}_${nextId}`, JSON.stringify(log.full));
     }
   }
 
@@ -253,7 +275,7 @@ export function getActiveBlend() {
 
 export function saveActiveBlend(result) {
   const entry = { ...result, date: new Date().toISOString() };
-  localStorage.setItem(KEYS.ACTIVE_BLEND, JSON.stringify(entry));
+  safeSetItem(KEYS.ACTIVE_BLEND, JSON.stringify(entry));
   // Also track in blend history
   saveBlendHistory({
     e85Gallons: result.e85Gallons,

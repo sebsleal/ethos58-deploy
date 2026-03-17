@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Archive, Trash2, Search, FileJson, FileSpreadsheet, FileUp } from 'lucide-react';
 import {
@@ -12,6 +12,7 @@ import {
 } from '../utils/storage';
 import { InsetCard, PageHeader, StatusPill, SurfaceCard } from '../components/ui';
 import { hapticSuccess, hapticWarning } from '../utils/haptics';
+import { indexGarageLogsInSpotlight } from '../utils/iosNative';
 
 function downloadBlob(filename, content, type) {
   const blob = new Blob([content], { type });
@@ -42,6 +43,10 @@ const Garage = () => {
     const matchTag = tagFilter === 'all' || (log.tags || []).includes(tagFilter);
     return matchSearch && matchTag;
   }), [logs, search, tagFilter]);
+
+  useEffect(() => {
+    indexGarageLogsInSpotlight(logs);
+  }, [logs]);
 
   const onTagEdit = (id, raw) => {
     const tags = raw.split(',').map((t) => t.trim()).filter(Boolean);

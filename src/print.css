@@ -1,0 +1,22 @@
+@media print {
+  body.print-health-report .app-shell-sidebar,
+  body.print-health-report nav,
+  body.print-health-report .app-topbar,
+  body.print-health-report button,
+  body.print-health-report input,
+  body.print-health-report select,
+  body.print-health-report textarea {
+    display: none !important;
+  }
+
+  body.print-health-report .print-health-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    margin-bottom: 12px;
+  }
+
+  body.print-health-report {
+    background: #fff !important;
+    color: #000 !important;
+  }
+}

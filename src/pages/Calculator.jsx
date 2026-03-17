@@ -20,6 +20,7 @@ import {
 } from '../utils/storage';
 import { trackEvent, trackError } from '../utils/telemetry';
 import { hapticSuccess, hapticWarning, hapticError, hapticLight } from '../utils/haptics';
+import { donateBlendShortcut, startBlendLiveActivity, updateWidgetSnapshot } from '../utils/iosNative';
 import { Droplet, AlertTriangle, BookmarkPlus, Bookmark, Trash2, RotateCcw, MapPin, Star, ChevronDown, Calculator as CalculatorIcon, Route, History, X, Zap } from 'lucide-react';
 import { PageHeader } from '../components/ui';
 
@@ -297,6 +298,15 @@ const Calculator = () => {
         warnings: data.warnings,
       };
       saveActiveBlend(mapped);
+      updateWidgetSnapshot(mapped);
+      donateBlendShortcut(mapped);
+      if (mapped.precisionModeActive && Array.isArray(mapped.fillSteps) && mapped.fillSteps.length > 0) {
+        startBlendLiveActivity({
+          title: `E${mapped.resultingBlend} precision fill`,
+          steps: mapped.fillSteps,
+          resultingBlend: mapped.resultingBlend,
+        });
+      }
       setResult(mapped);
       setBlendHistory(getBlendHistory());
       if (mapped.warnings?.length) hapticWarning();
