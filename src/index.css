@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;1,14..32,400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,107 +6,108 @@
 
 @layer base {
   :root {
+    --bg-page: #f0ede8;
+    --bg-surface: #ffffff;
+    --bg-muted: #f7f5f1;
+    --border: #e8e4de;
+    --text-primary: #1a1a1a;
+    --text-secondary: #9a958e;
+    --text-muted: #b5b0a6;
+    --text-dark-muted: #6a655e;
+    --success-bg: #eaf7f1;
+    --success-text: #22a96e;
+    --warn-bg: #fdf3e5;
+    --warn-text: #c97f22;
+    --danger-text: #e0513a;
+    --accent-yellow: #e8c97a;
+    --dark-card-bg: #1a1a1a;
+    --dark-card-inner: #272320;
+    --dark-card-text: #ffffff;
+    --dark-card-muted: #6a6560;
+    --dark-card-border: #4a4540;
+    --page-glow: rgba(255, 255, 255, 0.72);
+    --page-gradient-start: #f4f1eb;
+    --selection: rgba(26, 26, 26, 0.12);
+    --focus-ring: rgba(26, 26, 26, 0.18);
     color-scheme: light;
-    --app-bottom-inset: env(safe-area-inset-bottom);
-    --app-bg: #f1f2f5;
-    --app-bg-soft: #f6f7fa;
-    --app-canvas: #f6f7fa;
-    --app-canvas-elevated: #ffffff;
-    --app-rail: #0d0e12;
-    --app-rail-elevated: #13141a;
-    --app-card: #ffffff;
-    --app-card-elevated: #ffffff;
-    --app-card-inset: #f0f1f4;
-    --app-border: rgba(0, 0, 0, 0.07);
-    --app-border-strong: rgba(0, 0, 0, 0.14);
-    --app-text: #1c2333;
-    --app-text-muted: #64748b;
-    --app-heading: #0f172a;
-    --app-rail-text: rgba(255, 255, 255, 0.5);
-    --app-rail-heading: #ffffff;
-    --app-accent: #0d9488;
-    --app-accent-soft: rgba(13, 148, 136, 0.08);
-    --app-danger: #dc2626;
-    --app-warning: #d97706;
-    --app-success: #059669;
-    --app-chart-grid: rgba(148, 163, 184, 0.1);
-    --app-chart-axis: #64748b;
-    --app-chart-axis-muted: #94a3b8;
-    --app-chart-brush-fill: rgba(226, 232, 240, 0.7);
-    --app-chart-brush-stroke: rgba(148, 163, 184, 0.44);
   }
 
   :root.dark {
+    --bg-page: #161311;
+    --bg-surface: #201c19;
+    --bg-muted: #2a2522;
+    --border: #3a342f;
+    --text-primary: #f3eee8;
+    --text-secondary: #b1a89e;
+    --text-muted: #837b72;
+    --text-dark-muted: #c8bdb2;
+    --success-bg: rgba(34, 169, 110, 0.14);
+    --success-text: #72d7aa;
+    --warn-bg: rgba(201, 127, 34, 0.18);
+    --warn-text: #f0bc72;
+    --danger-text: #ff8f7c;
+    --accent-yellow: #e8c97a;
+    --dark-card-bg: #0f0d0b;
+    --dark-card-inner: #1a1714;
+    --dark-card-text: #ffffff;
+    --dark-card-muted: #9b9388;
+    --dark-card-border: #5a534c;
+    --page-glow: rgba(82, 69, 57, 0.24);
+    --page-gradient-start: #1b1714;
+    --selection: rgba(255, 255, 255, 0.12);
+    --focus-ring: rgba(255, 255, 255, 0.2);
     color-scheme: dark;
-    --app-bg: #09090b;
-    --app-bg-soft: #0c0c0f;
-    --app-canvas: #0c0c0f;
-    --app-canvas-elevated: #111116;
-    --app-rail: #07070a;
-    --app-rail-elevated: #0d0e13;
-    --app-card: #111116;
-    --app-card-elevated: #16161c;
-    --app-card-inset: #0a0a0e;
-    --app-border: rgba(255, 255, 255, 0.06);
-    --app-border-strong: rgba(255, 255, 255, 0.12);
-    --app-text: #d4d8e2;
-    --app-text-muted: #556070;
-    --app-heading: #eef0f5;
-    --app-rail-text: rgba(210, 218, 232, 0.45);
-    --app-rail-heading: #f8fafc;
-    --app-accent: #2dd4bf;
-    --app-accent-soft: rgba(45, 212, 191, 0.08);
-    --app-danger: #f87171;
-    --app-warning: #fbbf24;
-    --app-success: #34d399;
-    --app-chart-grid: rgba(255, 255, 255, 0.04);
-    --app-chart-axis: #3d4a5c;
-    --app-chart-axis-muted: #4a5568;
-    --app-chart-brush-fill: rgba(20, 20, 26, 0.9);
-    --app-chart-brush-stroke: rgba(60, 60, 70, 0.8);
+  }
+
+  * {
+    box-sizing: border-box;
   }
 
   html,
   body,
   #root {
-    height: 100%;
+    min-height: 100%;
   }
 
   html {
-    background: var(--app-bg);
+    background-color: var(--bg-page);
   }
 
   body {
     margin: 0;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 400;
+    background:
+      radial-gradient(circle at top left, var(--page-glow), transparent 28%),
+      linear-gradient(180deg, var(--page-gradient-start) 0%, var(--bg-page) 42%);
+    color: var(--text-primary);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    background: var(--app-bg);
-    color: var(--app-text);
   }
 
-  :where(button, a, input, select, textarea, [role='button'], summary):focus-visible {
-    outline: 2px solid var(--app-accent);
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  ::selection {
+    background: var(--selection);
+  }
+
+  :where(button, input, textarea, select):focus-visible {
+    outline: 2px solid var(--focus-ring);
     outline-offset: 2px;
-    border-radius: 4px;
-  }
-
-  @supports (-webkit-touch-callout: none) {
-    input,
-    textarea,
-    select {
-      font-size: 16px !important;
-    }
-  }
-
-  [data-scroll-container] {
-    -webkit-overflow-scrolling: touch;
-    touch-action: pan-y;
   }
 
   ::-webkit-scrollbar {
-    width: 4px;
-    height: 4px;
+    width: 8px;
+    height: 8px;
   }
 
   ::-webkit-scrollbar-track {
@@ -114,276 +115,28 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: rgba(100, 116, 139, 0.25);
-    border-radius: 2px;
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: rgba(154, 149, 142, 0.45);
+    background-clip: padding-box;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(100, 116, 139, 0.45);
+    background: rgba(106, 101, 94, 0.55);
+    background-clip: padding-box;
   }
 }
 
-@layer components {
-  /* ── Shell ──────────────────────────────────── */
-  .app-shell {
-    background: var(--app-bg);
-    color: var(--app-text);
-  }
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
 
-  .app-rail {
-    background: var(--app-rail);
-    color: var(--app-rail-text);
-    border-color: var(--app-border);
-  }
-
-  .app-canvas {
-    background: var(--app-canvas);
-    color: var(--app-text);
-  }
-
-  /* ── Cards ──────────────────────────────────── */
-  .surface-card {
-    background: var(--app-card);
-    border: 1px solid var(--app-border);
-    color: var(--app-text);
-    border-radius: 6px;
-  }
-
-  .surface-card-strong {
-    background: var(--app-card-elevated);
-    border: 1px solid var(--app-border);
-    color: var(--app-text);
-    border-radius: 6px;
-  }
-
-  .surface-inset {
-    background: var(--app-card-inset);
-    border: 1px solid var(--app-border);
-    color: var(--app-text);
-    border-radius: 4px;
-  }
-
-  .surface-panel {
-    background: var(--app-canvas-elevated);
-    border: 1px solid var(--app-border);
-    color: var(--app-text);
-    border-radius: 6px;
-  }
-
-  /* ── Typography ─────────────────────────────── */
-  .app-heading {
-    color: var(--app-heading);
-  }
-
-  .app-muted {
-    color: var(--app-text-muted);
-  }
-
-  .app-divider {
-    border-color: var(--app-border);
-  }
-
-  /* ── Icon Button ────────────────────────────── */
-  .app-icon-button {
-    background: transparent;
-    border: 1px solid var(--app-border);
-    color: var(--app-text-muted);
-    border-radius: 6px;
-    transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
-  }
-
-  .app-icon-button:hover {
-    color: var(--app-heading);
-    background: var(--app-card-inset);
-    border-color: var(--app-border-strong);
-  }
-
-  /* ── Rail / Sidebar ─────────────────────────── */
-  .app-rail-link {
-    color: var(--app-rail-text);
-    border-radius: 5px;
-    transition: color 120ms ease, background 120ms ease;
-  }
-
-  .app-rail-link:hover {
-    color: var(--app-rail-heading);
-    background: rgba(255, 255, 255, 0.04);
-  }
-
-  .app-rail-link-active {
-    color: var(--app-rail-heading);
-    background: rgba(255, 255, 255, 0.05);
-  }
-
-  .app-rail-accent {
-    background: rgba(45, 212, 191, 0.12);
-    border: 1px solid rgba(45, 212, 191, 0.18);
-  }
-
-  /* ── Pills / Chips ──────────────────────────── */
-  .app-pill {
-    border-radius: 4px;
-    border: 1px solid var(--app-border);
-    background: var(--app-card-inset);
-    color: var(--app-text-muted);
-  }
-
-  .dark .app-pill {
-    background: rgba(10, 10, 14, 0.9);
-  }
-
-  /* ── Status ─────────────────────────────────── */
-  .app-status-safe {
-    color: var(--app-success);
-    background: color-mix(in srgb, var(--app-success) 8%, transparent);
-    border-color: color-mix(in srgb, var(--app-success) 16%, transparent);
-  }
-
-  .app-status-caution {
-    color: var(--app-warning);
-    background: color-mix(in srgb, var(--app-warning) 8%, transparent);
-    border-color: color-mix(in srgb, var(--app-warning) 16%, transparent);
-  }
-
-  .app-status-risk {
-    color: var(--app-danger);
-    background: color-mix(in srgb, var(--app-danger) 8%, transparent);
-    border-color: color-mix(in srgb, var(--app-danger) 16%, transparent);
-  }
-
-  /* ── Inputs ─────────────────────────────────── */
-  .app-input {
-    background: var(--app-card-inset);
-    border: 1px solid var(--app-border);
-    color: var(--app-text);
-    border-radius: 6px;
-    transition: border-color 120ms ease, box-shadow 120ms ease;
-  }
-
-  .dark .app-input {
-    background: rgba(10, 10, 14, 0.8);
-  }
-
-  .app-input:focus {
-    outline: none;
-    border-color: rgba(45, 212, 191, 0.4);
-    box-shadow: 0 0 0 2px rgba(45, 212, 191, 0.08);
-  }
-
-  /* ── Buttons ─────────────────────────────────── */
-  .app-button-primary {
-    background: var(--app-accent);
-    color: #000;
-    border: 1px solid transparent;
-    border-radius: 6px;
-    font-weight: 500;
-    letter-spacing: -0.01em;
-    transition: opacity 120ms ease;
-  }
-
-  .app-button-primary:hover {
-    opacity: 0.86;
-  }
-
-  .app-button-secondary {
-    background: var(--app-card-inset);
-    color: var(--app-heading);
-    border: 1px solid var(--app-border);
-    border-radius: 6px;
-    font-weight: 500;
-    transition: border-color 120ms ease, background 120ms ease;
-  }
-
-  .dark .app-button-secondary {
-    background: rgba(14, 14, 19, 0.8);
-  }
-
-  .app-button-secondary:hover {
-    border-color: var(--app-border-strong);
-  }
-
-  .app-button-danger {
-    background: color-mix(in srgb, var(--app-danger) 6%, transparent);
-    color: var(--app-danger);
-    border: 1px solid color-mix(in srgb, var(--app-danger) 18%, transparent);
-    border-radius: 6px;
-    transition: background 120ms ease;
-  }
-
-  .app-button-danger:hover {
-    background: color-mix(in srgb, var(--app-danger) 10%, transparent);
-  }
-
-  /* ── Toggle Groups ──────────────────────────── */
-  .app-toggle-group {
-    display: inline-flex;
-    gap: 2px;
-    padding: 3px;
-    background: var(--app-card-inset);
-    border: 1px solid var(--app-border);
-    border-radius: 7px;
-    align-items: stretch;
-  }
-
-  .app-toggle-option {
-    border: 1px solid transparent;
-    border-radius: 5px;
-    color: var(--app-text-muted);
-    transition: color 120ms ease, background 120ms ease;
-    font-size: 12px;
-    font-weight: 500;
-  }
-
-  .app-toggle-option:hover {
-    color: var(--app-heading);
-  }
-
-  .app-toggle-option-active {
-    background: var(--app-card-elevated);
-    color: var(--app-heading);
-    border-color: var(--app-border);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-  }
-
-  /* ── Soft Panel ─────────────────────────────── */
-  .app-soft-panel {
-    background: var(--app-card-inset);
-    border: 1px solid var(--app-border);
-    border-radius: 6px;
-  }
-
-  /* ── Chart Tooltip ──────────────────────────── */
-  .app-chart-tooltip {
-    background: var(--app-card-elevated);
-    border: 1px solid var(--app-border-strong);
-    color: var(--app-text);
-    border-radius: 6px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
-  }
-
-  /* ── Workspace ──────────────────────────────── */
-  .app-workspace {
-    position: relative;
-    padding: 0 0 2rem;
-  }
-
-  .app-workspace > * {
-    position: relative;
-  }
-
-  /* ── Vehicle Card ───────────────────────────── */
-  .app-vehicle-card {
-    display: flex;
-    width: 100%;
-    border-radius: 5px;
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    background: rgba(255, 255, 255, 0.025);
-    color: white;
-    transition: border-color 120ms ease, background 120ms ease;
-  }
-
-  .app-vehicle-card:hover {
-    border-color: rgba(255, 255, 255, 0.1);
-    background: rgba(255, 255, 255, 0.04);
-  }
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--text-primary);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
 }

@@ -1,9 +1,14 @@
 {
   "appId": "com.ethos85.app",
-  "appName": "Ethos85",
+  "appName": "Ethos",
   "webDir": "dist",
   "server": {
     "androidScheme": "https"
+  },
+  "ios": {
+    "preferredContentMode": "mobile",
+    "backgroundColor": "#161311",
+    "orientation": "portrait"
   },
   "plugins": {
     "SplashScreen": {

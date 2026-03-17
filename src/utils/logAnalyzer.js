@@ -115,20 +115,27 @@ const BOOST_DEMAND = 2;    // psi — demand threshold regardless of load
 const BOOST_WOT = 8;    // psi — WOT threshold regardless of load
 const LOAD_TIMING = 40;   // % — minimum load for meaningful timing corrections
 
-// E0 baseline AFR thresholds (scaled per ethanol via getAfrThresholds)
-const AFR_LEAN_RISK = 13.8;
-const AFR_LEAN_CAUTION = 13.0;
+// AFR lean thresholds are now per-blend via getAfrThresholds (lookup table from PDF).
+// Rich limits remain E0-baseline, scaled by stoich ratio.
 const AFR_RICH_RISK = 10.0;
 const AFR_RICH_CAUTION = 10.8;
 
+// HPFP thresholds are engine-specific — see getHpfpDropThresholds(engine).
+// These are used as fallback for unknown engines.
 const HPFP_DROP_RISK_PCT = 20;
 const HPFP_DROP_CAUTION_PCT = 10;
 
 const IAT_RISK_F = 140;
 const IAT_CAUTION_F = 120;
 
-const TIMING_RISK_DEG = -4.0;
-const TIMING_CAUTION_DEG = -2.0;
+// Per PDF Quick Rule Reference:
+//   >−5° single cylinder sustained       → KNOCK RISK
+//   >−4° on 3+ cylinders simultaneously  → FUEL QUALITY (handled in analyzeTimingCorrections)
+//   >−3° single cyl                       → CAUTION
+const TIMING_RISK_DEG = -5.0;
+const TIMING_CAUTION_DEG = -3.0;
+const TIMING_MULTICYL_RISK_DEG = -4.0; // threshold for simultaneous multi-cyl fuel quality flag
+const TIMING_MULTICYL_MIN_CYLS = 3;    // how many cylinders must pull simultaneously
 
 function maxFinite(values) {
   let peak = null;
@@ -168,20 +175,73 @@ function normalizeBoostToPsi(v, unit) {
 
 /**
  * Compute ethanol-adjusted AFR safety thresholds.
- * At higher ethanol, stoich AFR is lower — lean/rich limits scale proportionally.
- *   E0  → stoich 14.7   E40 → stoich ~12.4   E85 → stoich ~9.8
+ *
+ * Stoich and lean alarm values come from the BMW Datalog Diagnostic Reference PDF
+ * (sourced from HP Academy, ARM Motorsports, and community validation).
+ * BMW DMEs always report AFR relative to gasoline stoich (14.7) — true lambda is
+ * reported_AFR ÷ 14.7. A single-sample spike to 234.95 AFR post-lift is a DME
+ * fuel-cut sentinel value and is filtered upstream via FUEL_CUT_AFR.
+ *
+ * Stoich lookup (exact PDF values):
+ *   E0: 14.7   E10: 14.1   E30: 12.1   E40: 11.4   E85: 9.8   E100: 9.0
+ *
+ * Lean alarm thresholds (reported AFR from PDF):
+ *   E0/E10: >13.0   E30: >11.5   E40: >10.8   E85: >9.5
  */
 function getAfrThresholds(ethanolPercent = 10) {
-  const e = Math.min(85, Math.max(0, Number(ethanolPercent) || 10));
-  const stoich = parseFloat((14.7 - (14.7 - 9.8) * (e / 85)).toFixed(2));
+  const e = Math.min(100, Math.max(0, Number(ethanolPercent) || 10));
+
+  // Piecewise linear interpolation between known PDF data points
+  const STOICH_POINTS = [
+    [0, 14.7], [10, 14.1], [30, 12.1], [40, 11.4], [85, 9.8], [100, 9.0],
+  ];
+  const LEAN_RISK_POINTS = [
+    [0, 13.5], [10, 13.5], [30, 12.0], [40, 11.3], [85, 10.0], [100, 9.3],
+  ];
+  const LEAN_CAUTION_POINTS = [
+    [0, 13.0], [10, 13.0], [30, 11.5], [40, 10.8], [85, 9.5], [100, 8.8],
+  ];
+
+  function interp(points, x) {
+    if (x <= points[0][0]) return points[0][1];
+    if (x >= points[points.length - 1][0]) return points[points.length - 1][1];
+    for (let i = 0; i < points.length - 1; i++) {
+      const [x0, y0] = points[i];
+      const [x1, y1] = points[i + 1];
+      if (x >= x0 && x <= x1) {
+        return y0 + (y1 - y0) * ((x - x0) / (x1 - x0));
+      }
+    }
+    return points[points.length - 1][1];
+  }
+
+  const stoich = parseFloat(interp(STOICH_POINTS, e).toFixed(2));
+  const lean_risk = parseFloat(interp(LEAN_RISK_POINTS, e).toFixed(2));
+  const lean_caution = parseFloat(interp(LEAN_CAUTION_POINTS, e).toFixed(2));
   const r = stoich / 14.7;
+
   return {
     stoich,
-    lean_risk: parseFloat((AFR_LEAN_RISK * r).toFixed(2)),
-    lean_caution: parseFloat((AFR_LEAN_CAUTION * r).toFixed(2)),
+    lean_risk,
+    lean_caution,
     rich_risk: parseFloat((AFR_RICH_RISK * r).toFixed(2)),
     rich_caution: parseFloat((AFR_RICH_CAUTION * r).toFixed(2)),
   };
+}
+
+/**
+ * Engine-specific HPFP drop thresholds (from PDF Quick Rule Reference).
+ *   B58 Gen1:        >20% = Risk,  >10% = Caution
+ *   B58TU / S55 / S58: >18% = Risk,   >8% = Caution
+ *   N54 / N55:       >20% = Risk,  >10% = Caution  (absolute PSI thresholds also apply)
+ *   Others:          >20% = Risk,  >10% = Caution
+ */
+function getHpfpDropThresholds(engine) {
+  const e = (engine || '').toUpperCase();
+  if (e.includes('B58TU') || e.includes('B58 GEN2') || e.includes('S55') || e.includes('S58')) {
+    return { risk: 18, caution: 8 };
+  }
+  return { risk: HPFP_DROP_RISK_PCT, caution: HPFP_DROP_CAUTION_PCT };
 }
 
 function isDemand(load, boost, pedal, throttle) {
@@ -311,7 +371,8 @@ function analyzeAfr(rows, columns, isLambdaAfr, thresholds, boostUnit) {
 
 // ─── HPFP Analysis ───────────────────────────────────────────────────────────
 
-function analyzeHpfp(rows, columns, boostUnit) {
+function analyzeHpfp(rows, columns, boostUnit, engine) {
+  const { risk: HPFP_RISK, caution: HPFP_CAUTION } = getHpfpDropThresholds(engine);
   const actualCol = columns.hpfp;
   const targetCol = columns.hpfp_target;
   const loadCol = columns.load;
@@ -392,18 +453,29 @@ function analyzeHpfp(rows, columns, boostUnit) {
   const displayActual = worstCrash?.actual ?? avgActual;
   const displayTarget = worstCrash?.target ?? avgTarget ?? peakActual;
 
-  if (maxDropPct >= HPFP_DROP_RISK_PCT) {
+  // Absolute PSI floor checks (PDF Quick Rule Reference — universal for all engines):
+  //   actual < 1,400 PSI sustained WOT = CRITICAL
+  //   actual < 1,800 PSI sustained WOT = WARNING
+  const minActual = actuals.length ? Math.min(...actuals.filter(v => v > 0)) : null;
+  const absoluteCritical = minActual !== null && minActual < 1400;
+  const absoluteWarning  = minActual !== null && minActual < 1800 && !absoluteCritical;
+
+  if (maxDropPct >= HPFP_RISK || absoluteCritical) {
     status = 'Risk';
     const pedalText = !isNaN(worstCrash?.pedal) ? ` at ${roundN(worstCrash.pedal, 0)}% pedal` : '';
     note = worstCrash
       ? `HPFP crash${pedalText}: target ${roundN(worstCrash.target, 0)} psi, actual ${roundN(worstCrash.actual, 0)} psi (${roundN(maxDropPct, 1)}% drop).`
-      : `HPFP dropped ${roundN(maxDropPct, 1)}% below ${avgTarget ? 'target' : 'session peak'} during engine demand.`;
-  } else if (maxDropPct >= HPFP_DROP_CAUTION_PCT) {
+      : absoluteCritical
+        ? `HPFP fell to ${roundN(minActual, 0)} psi — below 1,400 psi absolute critical threshold.`
+        : `HPFP dropped ${roundN(maxDropPct, 1)}% below ${avgTarget ? 'target' : 'session peak'} during engine demand.`;
+  } else if (maxDropPct >= HPFP_CAUTION || absoluteWarning) {
     status = 'Caution';
     const pedalText = !isNaN(worstCrash?.pedal) ? ` at ${roundN(worstCrash.pedal, 0)}% pedal` : '';
     note = worstCrash
       ? `HPFP dipped${pedalText}: target ${roundN(worstCrash.target, 0)} psi, actual ${roundN(worstCrash.actual, 0)} psi (${roundN(maxDropPct, 1)}% drop).`
-      : `HPFP dipped ${roundN(maxDropPct, 1)}% under load — monitor closely.`;
+      : absoluteWarning
+        ? `HPFP dipped to ${roundN(minActual, 0)} psi — below 1,800 psi warning threshold. Monitor closely.`
+        : `HPFP dipped ${roundN(maxDropPct, 1)}% under load — monitor closely.`;
   }
 
   return {
@@ -533,6 +605,7 @@ function analyzeTimingCorrections(rows, timingColumns, columns, boostUnit) {
   let worstDeg = 0;
   let worstCyl = null;
   let pullEvents = 0;
+  let multiCylEvents = 0; // rows where 3+ cylinders simultaneously exceed TIMING_MULTICYL_RISK_DEG
 
   for (const row of rows) {
     const load = num(row, loadCol);
@@ -548,6 +621,7 @@ function analyzeTimingCorrections(rows, timingColumns, columns, boostUnit) {
     if (!isNaN(p) && p < 1 && (!isNaN(t) ? t < 5 : true)) continue;
     if (l < LOAD_TIMING && b <= BOOST_DEMAND) continue;
 
+    let rowMultiCylCount = 0;
     for (const col of timingColumns) {
       const val = num(row, col);
       if (isNaN(val)) continue;
@@ -556,23 +630,33 @@ function analyzeTimingCorrections(rows, timingColumns, columns, boostUnit) {
         worstCyl = col;
       }
       if (val <= TIMING_CAUTION_DEG) pullEvents++;
+      if (val <= TIMING_MULTICYL_RISK_DEG) rowMultiCylCount++;
     }
+    if (rowMultiCylCount >= TIMING_MULTICYL_MIN_CYLS) multiCylEvents++;
   }
 
+  // Multi-cylinder simultaneous pull overrides single-cyl status (fuel quality issue)
   let status = 'Safe';
-  if (worstDeg <= TIMING_RISK_DEG) status = 'Risk';
-  else if (worstDeg <= TIMING_CAUTION_DEG) status = 'Caution';
+  if (worstDeg <= TIMING_RISK_DEG || multiCylEvents > 2) status = 'Risk';
+  else if (worstDeg <= TIMING_CAUTION_DEG || multiCylEvents > 0) status = 'Caution';
 
   const cylLabel = worstCyl
     ? `${roundN(worstDeg, 1)}° on ${worstCyl}`
     : 'No corrections observed under load';
 
+  const multiCylNote = multiCylEvents > 2
+    ? `${multiCylEvents} rows with 3+ cylinders simultaneously pulling ≥${Math.abs(TIMING_MULTICYL_RISK_DEG)}° — fuel quality or octane issue suspected.`
+    : null;
+
   return {
     max_correction: roundN(worstDeg, 2),
     cylinders: cylLabel,
     pull_events: pullEvents,
+    multi_cyl_events: multiCylEvents,
     status,
-    note: status !== 'Safe' ? `Worst timing pull under load: ${cylLabel}.` : null,
+    note: status !== 'Safe'
+      ? (multiCylNote ?? `Worst timing pull under load: ${cylLabel}.`)
+      : null,
   };
 }
 
@@ -621,8 +705,8 @@ function buildChartData(rows, columns, isLambdaAfr, boostUnit, maxPoints = 150, 
       }
       if (dropPct > worstDrop) { worstDrop = dropPct; worstHpfpRowIdx = j; }
     }
-    // Only mark if it actually crossed the risk threshold
-    if (worstDrop < HPFP_DROP_RISK_PCT) worstHpfpRowIdx = -1;
+    // Only mark if it actually crossed the risk threshold (use generic 18% as chart cutoff)
+    if (worstDrop < 18) worstHpfpRowIdx = -1;
   }
 
   const step = Math.max(1, Math.floor(rows.length / maxPoints));
@@ -719,16 +803,38 @@ function buildKeyPoints(afr, hpfp, iat, timing, carDetails) {
 
   // HPFP context
   if (hpfp.actual !== null) {
-    const isHighEthanol = ethanol >= 40;
+    const isHighEthanol = ethanol >= 30;
+    const isB58 = engine.includes('B58');
+    const isN20 = engine.includes('N20') || engine.includes('N26');
+    const isB48 = engine.includes('B48');
     if (hpfp.status !== 'Safe') {
-      const fuelNote = isHighEthanol
-        ? `High-ethanol blends demand higher fuel flow — ensure your LPFP (low-side pump) is upgraded for E${ethanol}.`
-        : `Check LPFP health, fuel filter condition, and HPFP cam lobe wear.`;
+      let fuelNote;
+      if (isN20) {
+        fuelNote = `On the N20/N26 this is a critical warning — HPFP pressure drops are a primary symptom of cam follower failure. Do not continue high-load driving. Inspect the HPFP cam follower immediately; failure to address this leads to catastrophic engine damage.`;
+      } else if (isB58 && isHighEthanol) {
+        fuelNote = `On a Gen 1 B58 running E${ethanol}, this is a classic HPFP crash signature. The stock 3-lobe pump cannot sustain the higher fuel flow ethanol demands — upgrade to the B58TU 4-lobe HPFP assembly. Also verify LPFP voltage stays above 13V under load.`;
+      } else if (isB48) {
+        fuelNote = `Check charge pipe integrity and LPFP health. B48 fuel system is generally robust — also verify the in-tank filter is clean and LPFP voltage holds above 13V under load.`;
+      } else if (isHighEthanol) {
+        fuelNote = `High-ethanol blends demand significantly higher fuel flow — ensure your LPFP (low-side pump) is upgraded for E${ethanol} and the in-tank filter is clean.`;
+      } else {
+        fuelNote = `Check LPFP health, fuel filter condition, and HPFP cam lobe wear.`;
+      }
       const crashContext = hpfp.worst_actual !== null && hpfp.worst_target !== null
         ? `Worst event: ${hpfp.worst_actual} psi actual vs ${hpfp.worst_target} psi target. `
         : '';
       points.push(
         `${crashContext}HPFP dropped ${hpfp.max_drop_pct}% vs target under load. ${fuelNote}`
+      );
+    } else if (isN20) {
+      points.push(
+        `HPFP holding at ${hpfp.actual} psi — acceptable for now. ` +
+        `N20/N26 cam follower wear can appear suddenly; inspect the follower if mileage exceeds 50k or any pressure instability appears in future logs.`
+      );
+    } else if (isHighEthanol && isB58) {
+      points.push(
+        `HPFP holding at ${hpfp.actual} psi under load on E${ethanol}. ` +
+        `Gen 1 B58 margin narrows quickly above E30 — if increasing blend further, upgrade to the B58TU HPFP and confirm LPFP flow capacity.`
       );
     } else if (isHighEthanol) {
       points.push(
@@ -741,18 +847,34 @@ function buildKeyPoints(afr, hpfp, iat, timing, carDetails) {
   // Timing context
   if (timing.max_correction !== null && timing.max_correction < TIMING_CAUTION_DEG) {
     const isHighEthanol = ethanol >= 30;
-    const pullNote = isHighEthanol
-      ? `On E${ethanol}, knock retard is unexpected — check for heat soak, misfires, or a faulty knock sensor.`
-      : `On E${ethanol}, consider raising ethanol content or adding water-methanol injection to reduce knock sensitivity.`;
+    const isB58 = engine.includes('B58');
+    const isS55 = engine.includes('S55');
+    const isN20 = engine.includes('N20') || engine.includes('N26');
+    let pullNote;
+    if (isN20) {
+      pullNote = `On the N20/N26, timing pull under load is often caused by a deteriorating cam follower reducing HPFP supply, leading to a lean condition and detonation. Check HPFP data in this log and inspect the follower immediately if any pressure drop is present.`;
+    } else if (isS55) {
+      pullNote = `The S55 has good knock resistance on quality fuel — timing retard here may indicate a heat soak issue (check IAT), a misfire on a worn coil pack, or insufficient octane margin on pump gas. On ethanol, rule out HPFP supply first.`;
+    } else if (isHighEthanol && isB58) {
+      pullNote = `On E${ethanol} the B58 should have excellent knock resistance — timing retard here often means the HPFP is crashing and the mixture is going lean under load. Check HPFP health first. Also verify ignition plugs are one heat range colder (e.g. NGK 97506 / BKR7EIX) as ethanol tunes increase cylinder temps.`;
+    } else if (isHighEthanol) {
+      pullNote = `On E${ethanol}, knock retard is unexpected — check for HPFP supply issues, heat soak, misfires, or a faulty knock sensor.`;
+    } else {
+      pullNote = `On E${ethanol}, consider raising ethanol content or adding water-methanol injection to reduce knock sensitivity.`;
+    }
     points.push(`Timing correction of ${timing.max_correction}° under load. ${pullNote}`);
   }
 
   // IAT context
   if (iat.value !== null && iat.status !== 'Safe') {
     const intercoolerNote =
-      engine.includes('S58') ? 'The S58 generates significant heat — an upgraded charge cooler is strongly recommended.' :
-        engine.includes('N55') || engine.includes('N54') ? 'N-series engines benefit from an upgraded FMIC at sustained high IAT.' :
-          'A front-mount intercooler (FMIC) or upgraded top-mount will help significantly.';
+      engine.includes('S58') ? 'The S58 uses a water-to-air charge cooler in the intake manifold — verify the charge-cooler pump is running and the coolant reservoir is full. An upgraded heat exchanger will also help.' :
+      engine.includes('S55') ? 'The S55 runs hot under sustained load — verify water pump operation (a common S55 failure) and consider an upgraded charge-cooler heat exchanger.' :
+      engine.includes('N63') || engine.includes('S63') ? 'The N63/S63 has an in-valley intercooler — verify the charge-cooler pump is working. IAT spikes on this engine often indicate charge-cooler pump failure rather than ambient heat soak.' :
+      engine.includes('N55') || engine.includes('N54') ? 'N-series engines benefit from a front-mount intercooler (FMIC) at sustained high IAT — a top-mount replacement is a worthwhile first upgrade.' :
+      engine.includes('B58') || engine.includes('B48') ? 'The B58/B48 top-mount intercooler heat-soaks quickly — an upgraded TMIC or FMIC will significantly reduce charge temps on back-to-back pulls.' :
+      engine.includes('N20') || engine.includes('N26') ? 'The N20/N26 benefits from an FMIC on aggressive maps — stock top-mount saturates quickly on repeated pulls.' :
+      'A front-mount intercooler (FMIC) or upgraded top-mount will significantly reduce charge temps.';
     points.push(`Peak IAT of ${iat.peak_f}°F indicates heat soak. ${intercoolerNote}`);
   }
 
@@ -766,11 +888,105 @@ function formatTimeLabel(v) {
   return `${roundN(v, 1)}s`;
 }
 
-function getEngineSpecificChecks(engine) {
+/**
+ * Spark plug recommendation based on engine + ethanol content.
+ * Data sourced from BMW Datalog Diagnostic Reference PDF.
+ */
+function getSparkPlugNote(engine, ethanol) {
   const e = (engine || '').toUpperCase();
-  if (e.includes('S58')) return ['Run repeated 3rd–4th gear pulls to confirm charge-cooling consistency.', 'Verify charge-cooler pump flow and coolant bleed state.'];
-  if (e.includes('N54') || e.includes('N55')) return ['Pressure-test charge pipes and vacuum lines for boost leaks.', 'Inspect plugs/coils and log misfire counters during pull.'];
-  if (e.includes('B58')) return ['Review rail-pressure control and injector corrections in the same RPM band.', 'Check HPFP/LPFP targets against your map revision notes.'];
+  const eth = Number(ethanol) || 10;
+  // N54 has different heat ranges than N55 — important not to cross-apply
+  if (e.includes('N54')) {
+    if (eth >= 30) return 'Spark plugs: NGK 97506 at 0.020" gap for E30+ (N54 — do NOT use N55 plug specs for this engine).';
+    return 'Spark plugs: NGK 97506 at 0.022" gap for Stage 2+ pump gas (N54 — one range colder than OEM).';
+  }
+  if (e.includes('N55')) {
+    if (eth >= 60) return 'Spark plugs: NGK 97506 (or one step colder) at 0.018" gap for E60+ (N55 — ships with colder stock plugs than N54).';
+    if (eth >= 30) return 'Spark plugs: NGK 97506 at 0.020" gap for E30–E50 on N55.';
+    return 'Spark plugs: NGK 97506 at 0.022–0.024" gap for Stage 1–2 pump gas (N55).';
+  }
+  if (e.includes('N20') || e.includes('N26')) {
+    if (eth >= 30) return 'Spark plugs: NGK 97506 at 0.020" gap for E30–E50 on N20/N26.';
+    return 'Spark plugs: NGK 97506 at 0.024" gap for Stage 1 pump gas (N20/N26).';
+  }
+  if (e.includes('S55')) {
+    return 'Spark plugs: NGK 97506 at 0.018–0.020" gap for all fuel blends on S55 (ARM Motorsports E85 validated).';
+  }
+  if (e.includes('S58')) {
+    if (eth >= 60) return 'Spark plugs: NGK 97506 or one step colder at 0.018" gap for E60–E85 on S58.';
+    if (eth >= 30) return 'Spark plugs: NGK 97506 at 0.020" gap for E30–E50 on S58.';
+    return 'Spark plugs: NGK 97506 at 0.020–0.022" gap for pump gas on S58.';
+  }
+  if (e.includes('B48')) {
+    if (eth >= 60) return 'Spark plugs: one step colder than NGK 97506 at 0.018" gap for E60+ on B48.';
+    if (eth >= 30) return 'Spark plugs: NGK 97506 at 0.020" gap for E30+ on B48.';
+    return 'Spark plugs: OEM or NGK 97506 at 0.024" gap for pump gas on B48.';
+  }
+  // B58 Gen1 / B58TU
+  if (eth >= 60) return 'Spark plugs: NGK 96206 (2-step colder) at 0.018–0.020" gap for E60–E85 / >500 WHP on B58.';
+  if (eth >= 30) return 'Spark plugs: NGK 97506 (1-step colder) at 0.020–0.022" gap for E30–E50 on B58 — required for ethanol tunes.';
+  return 'Spark plugs: NGK 94201 (OEM Gen1) or NGK 97506 at 0.024–0.026" gap for Stage 1–2 on 93 octane.';
+}
+
+function getEngineSpecificChecks(engine, ethanol) {
+  const e = (engine || '').toUpperCase();
+  const plugNote = getSparkPlugNote(engine, ethanol);
+  if (e.includes('S58')) return [
+    'Run repeated 3rd–4th gear pulls to confirm charge-cooling consistency — S58 charge cooler electric pump is the primary IAT failure mode.',
+    'Verify charge-cooler pump function: successive pull start IAT rising >15°F cumulatively = pump failure.',
+    'Check ignition coil health — S58 coils are a known wear item under sustained high load.',
+    plugNote,
+  ];
+  if (e.includes('S55')) return [
+    'Check rod bearing condition — S55 rod bearings are a known wear item. Log oil pressure if possible: should be ≥65 PSI at high RPM under load. Risk zone: 60k–100k miles with infrequent oil changes or track use.',
+    'Verify water pump function — S55 water pump failures cause rapid IAT spikes and coolant loss; a very common S55 failure.',
+    'S55 stock HPFP is adequate to ~E50 at 500 WHP. E85 at 550+ WHP begins showing pressure variance — LPFP upgrade minimum. Injector IDC limit: ~500–550 WHP pump gas, ~400 WHP E85 on stock injectors.',
+    'S55 runs higher oil pressure targets than N55 (BMW acknowledged this in DME calibration). Same variable-rate pump solenoid risk applies — consider solenoid modification at high mileage.',
+    plugNote,
+  ];
+  if (e.includes('N54')) return [
+    'Check for QCV/solenoid failure: look for ±100–200 PSI oscillation in rail pressure at idle (normal = flat ~750 PSI). Erratic WOT drops with partial recovery = QCV. DTCs: 2FBF, 2FBE, 29DC, 29F3.',
+    'Check injector index codes — mismatched injector codes cause rail pressure instability on N54. Verify DME adaptation values match installed injectors.',
+    'Inspect for wastegate rattle: boost overshoot >2 PSI at tip-in with erratic WGDC on decel. Does not show in fuel pressure data.',
+    'Pressure-test charge pipes and vacuum lines for boost leaks.',
+    'HPFP: most failure-prone N-series engine — original Bosch pump (part ending 881) at 60k–140k miles is danger zone. Continental replacement (ending 943) is more reliable. N54 stock injector IDC limit: ~500–540 WHP pump gas, ~380–400 WHP E85.',
+    plugNote + ' NOTE: N54 stock plugs are one heat range HOTTER than N55 — do not cross-apply plug advice between these engines.',
+  ];
+  if (e.includes('N55')) return [
+    'N55 rod bearing risk — variable-rate oil pump solenoid can briefly starve bearings at WOT tip-in. Log oil pressure if available: <50 PSI at >4,500 RPM = WARN, <40 PSI = CRITICAL. Risk zone: 70k–120k miles with extended oil change intervals.',
+    'Preventive action: unplugging or blocking the oil pressure control solenoid forces maximum oil pressure continuously — a common N55 rod bearing protection mod.',
+    'Ethanol threshold: E30 is practical ceiling on stock HPFP with modified turbo. E40+ without pump upgrade causes rail drops <1,400 PSI. Tip-in pressure spikes up to 300 PSI swing are normal; >500 PSI swing = LPFP marginal.',
+    'Pressure-test charge pipes and vacuum lines for boost leaks.',
+    plugNote + ' NOTE: N55 ships with COLDER stock plugs than N54 — do not cross-apply plug advice between these engines.',
+  ];
+  if (e.includes('N20') || e.includes('N26')) return [
+    'URGENT — inspect the HPFP cam follower immediately. N20/N26 followers wear catastrophically between 30k–60k miles (some as early as 20k). Any HPFP pressure drop may indicate active failure.',
+    'Do not continue high-load driving until the cam follower has been physically inspected — failure leads to catastrophic engine damage.',
+    'If follower wear is confirmed, replace follower and inspect the HPFP cam lobe — BMW updated the part number to address this failure mode. B58TU HPFP retrofit is a proven fix (plug-and-play, no tune needed).',
+    'Check N20 timing chain stretch — a secondary known failure on higher-mileage units.',
+    plugNote,
+  ];
+  if (e.includes('B48')) return [
+    'Pressure-test charge pipes — OEM plastic B48 charge pipe is a primary failure point, typically at 60k–90k miles under tune or on first hard pull after a flash. Upgrade to aluminium/silicone unit.',
+    'B48 charge pipe failure signature: boost drops 3–8 PSI below target suddenly mid-pull, WGDC spikes to max, boost deficit persists on next pull.',
+    'Check LPFP voltage under full load — should hold above 13V. E40+ on stock B48 HPFP starts showing rail drops.',
+    'Check wastegate actuator function — B48 wastegate rattle is a known issue that can cause boost irregularity.',
+    plugNote,
+  ];
+  if (e.includes('B58')) return [
+    'Confirm you have the B58TU (Technical Update / HDP6) HPFP assembly — Gen 1 B58 HDP5 Evo capacity limit is ~350 WHP on E30+ (smooth linear pressure decline, not erratic spike). B58TU HDP6 is rated to 5,000+ PSI and supports E50 to ~420 WHP on stock tune.',
+    'Note: B58TU normal tip-in pressure is 3,200 PSI tapering to 2,900 PSI — this is intentional DME behavior, not a fault.',
+    'LPFP check: duty cycle >95–100% with pressure <60 PSI WOT = LPFP saturation — upgrade required for E40+. E60+ triggers LPFP upgrade even on B58TU.',
+    'Inspect and replace the in-tank fuel filter if not recently serviced — restriction directly reduces HPFP supply.',
+    'Injector duty cycle (MSV Duration): if maxed AND rail pressure is still dropping, both LPFP and injectors are saturated — stock HDEV 5.2 injectors hit IDC limit at ~380–400 WHP E85.',
+    plugNote,
+  ];
+  if (e.includes('N63') || e.includes('S63')) return [
+    'Check oil consumption — N63/S63 engines are known for elevated oil use; low oil level affects rod bearing and turbo lubrication.',
+    'Inspect valve stem seals — oil burning at cold startup is a warning sign; N63 Customer Care Package covers some of these failures.',
+    'Verify timing chain guide condition if mileage is above 80k — N63 timing chain guides are a known wear item.',
+    'Confirm charge-cooler (in-valley intercooler) pump is functioning — N63/S63 IAT spikes are often charge-cooler pump failures, not ambient heat soak.',
+  ];
   return ['Re-run a clean WOT pull in one gear and compare timing/HPFP trend repeatability.'];
 }
 
@@ -781,8 +997,14 @@ function getTuneChecks(tuneStage, ethanol) {
 
   if (stage.includes('custom')) checks.push('Ask your tuner to review this exact time window and smooth load-to-torque transition.');
   if (stage.includes('stage 2')) checks.push('Confirm hardware assumptions for Stage 2 (downpipe/intercooling/fueling) match the map.');
-  if (e >= 40) checks.push(`Validate low-side fuel delivery on E${e} at high duty (LPFP voltage, bucket fill, and filter condition).`);
-  else checks.push(`If knock persists on E${e}, test one step higher ethanol blend and recheck timing response.`);
+  if (e >= 40) {
+    checks.push(`Validate low-side fuel delivery on E${e} at high duty (LPFP voltage, bucket fill, and filter condition).`);
+    checks.push(`Confirm flex-fuel sensor reading matches actual blend — sensor drift on high ethanol is common.`);
+  } else if (e >= 30) {
+    checks.push(`E${e} is near the Gen 1 B58 HPFP limit — monitor drop percentage closely and consider B58TU pump upgrade before increasing blend.`);
+  } else {
+    checks.push(`If knock persists on E${e}, test one step higher ethanol blend and recheck timing response.`);
+  }
 
   return checks;
 }
@@ -798,7 +1020,7 @@ function buildDiagnosticCards(rows, columns, timingColumns, boostUnit, metrics, 
   const hpfpTargetCol = columns.hpfp_target;
   const iatCol = columns.iat;
 
-  const engineChecks = getEngineSpecificChecks(carDetails.engine);
+  const engineChecks = getEngineSpecificChecks(carDetails.engine, carDetails.ethanol);
   const tuneChecks = getTuneChecks(carDetails.tuneStage, carDetails.ethanol);
 
   // HPFP drop start detection
@@ -824,15 +1046,102 @@ function buildDiagnosticCards(rows, columns, timingColumns, boostUnit, metrics, 
 
     if (startRow) {
       const t = formatTimeLabel(num(startRow.row, timeCol));
+      const eng = (carDetails.engine || '').toUpperCase();
+      const isN20 = eng.includes('N20') || eng.includes('N26');
+      const isB58Gen1 = eng.includes('B58') && eng.includes('GEN1');
+      const isN54orN55 = eng.includes('N54') || eng.includes('N55');
+      const hpfpCauses = isN20 ? [
+        'HPFP cam follower failure — this is the primary N20/N26 failure mode. The follower that drives the HPFP wears through, starving the pump. Immediate inspection required.',
+        'Do not confuse with tune or fuel blend issues — on N20/N26 this is a mechanical problem first.',
+        'Ethanol content exceeding tune calibration (secondary consideration after follower is ruled out).',
+      ] : isB58Gen1 ? [
+        'Gen 1 B58 HPFP (3-lobe cam) is undersized for E30+ blends — upgrade to B58TU HPFP assembly strongly recommended.',
+        'Low-side fuel supply (LPFP) saturated — stock in-tank pump commonly maxes out on E30+ without an upgraded unit.',
+        'In-tank fuel filter restriction reducing HPFP supply pressure.',
+        'HPFP cam lobe wear — Gen 1 B58 3-lobe design wears faster under sustained high ethanol duty.',
+        'Ethanol content exceeding tune calibration (flex-fuel sensor drift or higher blend than map expects).',
+      ] : isN54orN55 ? [
+        'HPFP cam follower wear — N54/N55 followers are a documented failure point; inspect before replacing the pump.',
+        'Low-side fuel supply (LPFP) saturated under high load.',
+        'In-tank fuel filter restriction reducing HPFP supply pressure.',
+        'HPFP solenoid valve wear — common on high-mileage N54 units.',
+      ] : [
+        'Low-side fuel supply (LPFP) saturated — pump may be undersized for current power level or ethanol blend.',
+        'In-tank fuel filter restriction reducing HPFP supply pressure.',
+        'HPFP mechanical wear or cam lobe condition.',
+        'Ethanol content exceeding tune calibration (flex-fuel sensor drift or higher blend than map expects).',
+      ];
       cards.push({
         id: 'hpfp-drop-start',
         severity: metrics.hpfp.status,
         title: `HPFP drop starts${t ? ` at ${t}` : ''}`,
         evidence: `Rail pressure fell to ${roundN(startRow.actual, 0)} psi vs ${roundN(startRow.target, 0)} psi target (${roundN(startRow.dropPct, 1)}% drop) in a high-load window.`,
-        likelyCauses: ['Low-side fuel supply saturation (LPFP or filter restriction).', 'HPFP control or mechanical limitation at peak torque demand.'],
+        likelyCauses: hpfpCauses,
         recommendedChecks: [...engineChecks, ...tuneChecks],
       });
     }
+  }
+
+  // N20/N26 cam follower — detect high HPFP variance during WOT (RPM-synchronous oscillation proxy)
+  if (hpfpCol && hpfpTargetCol) {
+    const eng = (carDetails.engine || '').toUpperCase();
+    if (eng.includes('N20') || eng.includes('N26')) {
+      const wotActuals = [];
+      for (const row of rows) {
+        const load = num(row, loadCol);
+        const boost = normalizeBoostToPsi(num(row, boostCol), boostUnit);
+        const pedal = num(row, pedalCol);
+        const throttle = num(row, throttleCol);
+        if (!isHpfpCrashWindow(load, boost, pedal, throttle)) continue;
+        const a = num(row, hpfpCol);
+        if (!isNaN(a) && a > 0) wotActuals.push(a);
+      }
+      if (wotActuals.length >= 10) {
+        const mean = wotActuals.reduce((s, v) => s + v, 0) / wotActuals.length;
+        const stddev = Math.sqrt(wotActuals.reduce((s, v) => s + (v - mean) ** 2, 0) / wotActuals.length);
+        if (stddev > 180) {
+          cards.push({
+            id: 'n20-cam-follower',
+            severity: stddev > 280 ? 'Risk' : 'Caution',
+            title: 'N20/N26 HPFP oscillation — possible cam follower wear',
+            evidence: `Rail pressure standard deviation of ${Math.round(stddev)} PSI during WOT exceeds normal variance (>180 PSI). N20/N26 cam follower wear produces RPM-synchronous pressure oscillation as each cam lobe pass delivers progressively less volume.`,
+            likelyCauses: [
+              'HPFP cam follower wear — the primary N20/N26 failure mode. The follower wears through between 30k–60k miles (some as early as 20k).',
+              'Early wear: minor RPM-correlated oscillation. Progressive wear: gap widens with RPM. Advanced: pressure tracks LPFP levels (pump effectively bypassed).',
+              'Risk factors: frequent cold starts, infrequent oil changes, extended idle periods.',
+            ],
+            recommendedChecks: [
+              'URGENT: physically inspect the HPFP cam follower before any further high-load driving.',
+              'If follower wear is confirmed, replace follower and inspect the HPFP cam lobe — BMW updated part numbers to address this failure mode.',
+              'B58TU HPFP retrofit is a validated plug-and-play fix (no tune change needed) that extends capacity to ~440 WHP.',
+              ...tuneChecks,
+            ],
+          });
+        }
+      }
+    }
+  }
+
+  // Multi-cylinder simultaneous timing pull — fuel quality / octane issue
+  if (metrics?.timingCorrections?.multi_cyl_events > 2) {
+    cards.push({
+      id: 'timing-multi-cyl',
+      severity: 'Risk',
+      title: 'Multi-cylinder simultaneous timing pull',
+      evidence: `${metrics.timingCorrections.multi_cyl_events} rows detected with 3+ cylinders simultaneously pulling ≥${Math.abs(TIMING_MULTICYL_RISK_DEG)}°. Uniform corrections across multiple cylinders indicate a broad fuel quality or octane issue rather than a single-cylinder fault.`,
+      likelyCauses: [
+        'Fuel quality issue — octane rating lower than tune expects (e.g. 91 oct fuel on a 93 oct or ethanol tune).',
+        'Ethanol blend lower than configured — flex-fuel sensor drift or diluted blend (especially E85 winter blends can drop to E60).',
+        'Heat soak causing broad knock across all cylinders — check IAT data.',
+        'Faulty knock sensor sending uniform retard (less common — single-cylinder corrections would be expected first).',
+      ],
+      recommendedChecks: [
+        'Verify fuel octane — check your receipt or re-fill at a fresh station before the next pull.',
+        'If on ethanol, verify actual blend at the sensor and compare to your tune\'s configured E%.',
+        'Check IAT data in this log — >120°F IAT at WOT can reduce effective octane margin by several points.',
+        ...engineChecks,
+      ],
+    });
   }
 
   // Timing pull after IAT spike detection
@@ -874,7 +1183,7 @@ function buildDiagnosticCards(rows, columns, timingColumns, boostUnit, metrics, 
         likelyCauses: ['Charge-air heat soak reducing knock resistance.', 'Knock sensitivity from octane margin or ignition system weakness under heat.'],
         recommendedChecks: [
           'Log back-to-back pulls after full cooldown to isolate heat-related timing behavior.',
-          ...getEngineSpecificChecks(carDetails.engine),
+          ...getEngineSpecificChecks(carDetails.engine, carDetails.ethanol),
           ...getTuneChecks(carDetails.tuneStage, carDetails.ethanol),
         ],
       });
@@ -909,7 +1218,7 @@ export function analyzeParsedLog(parsed, filename, carDetails = {}) {
   const thresholds = getAfrThresholds(carDetails.ethanol);
 
   const afr = analyzeAfr(rows, columns, isLambdaAfr, thresholds, boostUnit);
-  const hpfp = analyzeHpfp(rows, columns, boostUnit);
+  const hpfp = analyzeHpfp(rows, columns, boostUnit, carDetails.engine);
   const iat = analyzeIat(rows, columns, boostUnit);
   const timing = analyzeTimingCorrections(rows, timingColumns, columns, boostUnit);
   const fuelTrims = analyzeFuelTrims(rows, columns);

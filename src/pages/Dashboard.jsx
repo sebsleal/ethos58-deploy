@@ -1,609 +1,2800 @@
-import { useMemo, useRef, useState, useEffect, useCallback } from 'react';
+import {
+  startTransition,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   Activity,
+  AlertCircle,
   ArrowRight,
-  CalendarClock,
-  Droplet,
-  FileText,
-  Flame,
-  Heart,
-  ShieldCheck,
+  ArrowUpCircle,
+  ArrowUpDown,
+  ArrowUpRight,
+  CalendarDays,
+  Calculator as CalculatorIcon,
+  Car,
+  ChevronDown,
+  Circle,
+  FileJson,
+  FileSpreadsheet,
+  FileUp,
+  FolderArchive,
+  LayoutDashboard,
+  ListFilter,
+  Menu,
+  X,
+  MonitorPlay,
+  Pencil,
+  Plus,
+  Search,
+  Settings2,
+  Sparkles,
   Trash2,
-  TrendingUp,
   Upload,
   Zap,
 } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { clearActiveBlend, clearRecentLogs, getActiveBlend, getLogResult, getRecentLogs } from '../utils/storage';
-import { hapticLight } from '../utils/haptics';
-import { usePullToRefresh } from '../hooks/usePullToRefresh';
-import { ActionTile, ChartCard, InsetCard, MetricPill, PageHeader, SectionTitle, StatusPill, SurfaceCard } from '../components/ui';
+import {
+  Area,
+  AreaChart,
+  Brush,
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Scatter,
+  ScatterChart,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import { analyzeLog } from '../utils/logAnalyzer';
+import {
+  calculateBlend,
+  calculateResultingOctane,
+  calibratePumpEthanol,
+  estimateBlendFillCost,
+  planEthanolOverTanks,
+  reverseCalculateBlend,
+} from '../utils/blendMath';
+import { mergeCompareChartData } from '../utils/logCompare';
+import {
+  deleteBlendProfile,
+  deleteGarageLog,
+  deleteStationPreset,
+  exportGarageBackup,
+  exportGarageSummaryCsv,
+  getActiveBlend,
+  getBlendProfiles,
+  getGarageLogs,
+  getLogResult,
+  getRecentLogs,
+  getSettings,
+  getStationPresets,
+  importGarageBackup,
+  saveActiveBlend,
+  saveBlendProfile,
+  saveGarageLog,
+  saveRecentLog,
+  saveSetting,
+  saveStationPreset,
+  updateGarageLogMeta,
+} from '../utils/storage';
+import { parseViewerCsv } from '../utils/viewerCsv';
 
-function formatDate(iso) {
-  const date = new Date(iso);
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-}
+const containerVariants = {
+  hidden: {},
+  show: {
+    transition: {
+      staggerChildren: 0.06,
+    },
+  },
+};
 
-function formatShortDate(iso) {
-  const date = new Date(iso);
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
+const itemVariants = {
+  hidden: { opacity: 0, y: 12 },
+  show: {
+    opacity: 1,
+    y: 0,
+    transition: {
+      duration: 0.3,
+      ease: 'easeOut',
+    },
+  },
+};
 
-function formatTimeAgo(iso) {
-  const deltaMs = new Date(iso).getTime() - Date.now();
-  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
-  const minutes = Math.round(deltaMs / 60000);
-  if (Math.abs(minutes) < 60) return rtf.format(minutes, 'minute');
-  const hours = Math.round(minutes / 60);
-  if (Math.abs(hours) < 24) return rtf.format(hours, 'hour');
-  const days = Math.round(hours / 24);
-  return rtf.format(days, 'day');
-}
+const VIEWER_COLORS = [
+  '#9a958e',
+  '#8f7d63',
+  '#22a96e',
+  '#c97f22',
+  '#e0513a',
+  '#7a746b',
+  '#c6a75a',
+  '#5c8577',
+];
 
-function scoreColor(score) {
-  if (score === null || score === undefined) return '#94a3b8';
-  if (score >= 80) return '#14b8a6';
-  if (score >= 55) return '#f59e0b';
-  return '#ef4444';
-}
+const DOWNSAMPLING_MAP = {
+  'Fast (800 pts)': 800,
+  'High Quality (1600 pts)': 1600,
+  'Original (All Data)': Number.POSITIVE_INFINITY,
+};
 
-function scoreLabel(score) {
-  if (score === null || score === undefined) return 'No Data';
-  if (score >= 80) return 'Healthy';
-  if (score >= 55) return 'Watch';
-  return 'Risk';
-}
+const LINE_WIDTH_MAP = {
+  'Thin (1px)': 1,
+  'Normal (1.5px)': 1.5,
+  'Thick (2px)': 2,
+};
 
-function average(values) {
-  if (!values.length) return null;
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
+const TIME_KEYWORDS = ['time', 'timestamp', 'elapsed', 'log time'];
+const AUTO_KEYWORDS = ['rpm', 'load', 'afr', 'lambda', 'boost', 'iat', 'hpfp', 'timing', 'knock'];
+const LITERS_PER_GALLON = 3.78541;
 
-function maxFinite(values) {
-  let best = null;
-  for (let i = 0; i < values.length; i += 1) {
-    const value = values[i];
-    if (!Number.isFinite(value)) continue;
-    if (best === null || value > best) best = value;
-  }
-  return best;
-}
+const analyzerDefaults = {
+  ethanol: '',
+  engine: '',
+  tuneStage: '',
+};
 
-function minFinite(values) {
-  let best = null;
-  for (let i = 0; i < values.length; i += 1) {
-    const value = values[i];
-    if (!Number.isFinite(value)) continue;
-    if (best === null || value < best) best = value;
-  }
-  return best;
-}
+const engineOptions = ['B58 Gen1', 'B58 Gen2', 'S58', 'N55', 'N54', 'Other'];
+const tuneOptions = ['Stage 1', 'Stage 2', 'Stage 2+', 'Custom E-tune'];
 
-function buildBoostSeries(analysis) {
-  const chartData = Array.isArray(analysis?.chartData) ? analysis.chartData : [];
-  const rows = chartData
-    .map((point, index) => {
-      const boost = Number(point?.boost);
-      if (!Number.isFinite(boost)) return null;
-      const rpm = Number(point?.rpm);
-      const time = Number(point?.time);
-      return {
-        key: index,
-        axisValue: Number.isFinite(rpm) ? rpm : Number.isFinite(time) ? time : index + 1,
-        boost,
-      };
-    })
-    .filter(Boolean);
+// Car profile storage
+function getCarProfiles() { try { return JSON.parse(localStorage.getItem('ethos_car_profiles') || '[]'); } catch { return []; } }
+function saveCarProfile(p) { const list = getCarProfiles(); list.push({ ...p, id: Date.now().toString() }); localStorage.setItem('ethos_car_profiles', JSON.stringify(list)); }
+function updateCarProfile(id, updates) { localStorage.setItem('ethos_car_profiles', JSON.stringify(getCarProfiles().map((p) => (p.id === id ? { ...p, ...updates } : p)))); }
+function deleteCarProfile(id) { localStorage.setItem('ethos_car_profiles', JSON.stringify(getCarProfiles().filter((p) => p.id !== id))); }
+function getActiveCar() { return localStorage.getItem('ethos_active_car') || null; }
+function setActiveCar(id) { if (id) localStorage.setItem('ethos_active_car', id); else localStorage.removeItem('ethos_active_car'); }
 
+function loadSnapshot() {
   return {
-    data: rows,
-    label: rows.some((point) => point.axisValue > 1000) ? 'RPM' : 'Time',
+    recentLogs: getRecentLogs(),
+    garageLogs: getGarageLogs(),
+    activeBlend: getActiveBlend(),
+    settings: getSettings(),
+    profiles: getBlendProfiles(),
+    stationPresets: getStationPresets(),
   };
 }
 
-function buildTimingSeries(analysis) {
-  const scatter = Array.isArray(analysis?.knockScatter) ? analysis.knockScatter : [];
-  if (!scatter.length) return [];
+function roundTo(value, decimals = 2) {
+  const factor = 10 ** decimals;
+  return Math.round(Number(value) * factor) / factor;
+}
 
-  const groups = new Map();
-  scatter.forEach((point) => {
-    const rpm = Number(point?.rpm);
-    const pull = Number(point?.pull);
-    if (!Number.isFinite(rpm) || !Number.isFinite(pull)) return;
-    const bucket = Math.round(rpm / 250) * 250;
-    const current = groups.get(bucket);
-    if (!current || pull < current.pull) {
-      groups.set(bucket, { rpm: bucket, pull });
-    }
+function toDisplayVolume(gallons, units) {
+  if (gallons === '' || gallons === null || gallons === undefined || Number.isNaN(Number(gallons))) return '';
+  return units === 'Metric' ? roundTo(Number(gallons) * LITERS_PER_GALLON, 2) : roundTo(Number(gallons), 2);
+}
+
+function fromDisplayVolume(value, units) {
+  const parsed = Number(value);
+  if (Number.isNaN(parsed)) return '';
+  return units === 'Metric' ? parsed / LITERS_PER_GALLON : parsed;
+}
+
+function formatVolume(gallons, units) {
+  const value = toDisplayVolume(gallons, units);
+  return `${value} ${units === 'Metric' ? 'L' : 'gal'}`;
+}
+
+function formatDate(value) {
+  if (!value) return 'No date';
+  return new Date(value).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+function formatDateTime(value) {
+  if (!value) return 'No timestamp';
+  return new Date(value).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function formatMetric(value, suffix = '', decimals = 1) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
+  return `${Number(value).toFixed(decimals)}${suffix}`;
+}
+
+function statusTone(status) {
+  if (status === 'Risk') return 'danger';
+  if (status === 'Caution') return 'warn';
+  return 'success';
+}
+
+function statusLabel(status) {
+  return status || 'Safe';
+}
+
+function downloadBlob(filename, content, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => resolve(String(event.target?.result || ''));
+    reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+    reader.readAsText(file);
+  });
+}
+
+function paletteColor(index) {
+  return VIEWER_COLORS[index % VIEWER_COLORS.length];
+}
+
+function detectTimeColumn(headers) {
+  return headers.find((header) => TIME_KEYWORDS.some((keyword) => header.toLowerCase().includes(keyword))) ?? null;
+}
+
+function detectNumericChannels(headers, rows) {
+  const sample = rows.slice(0, 40);
+  return headers.filter((header) => {
+    const values = sample.map((row) => parseFloat(row[header])).filter((value) => !Number.isNaN(value));
+    return values.length >= 5;
+  });
+}
+
+function computeViewerStats(channels, rows) {
+  const raw = {};
+  channels.forEach((channel) => {
+    const values = rows.map((row) => parseFloat(row[channel])).filter((value) => !Number.isNaN(value));
+    if (!values.length) return;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const avg = values.reduce((sum, value) => sum + value, 0) / values.length;
+    raw[channel] = { min, max, avg };
   });
 
-  return [...groups.values()].sort((a, b) => a.rpm - b.rpm);
+  const groups = {};
+  channels.forEach((channel) => {
+    if (!raw[channel]) return;
+    const match = channel.match(/\[([^\]]+)\]$/);
+    if (!match) {
+      groups[`solo_${channel}`] = [channel];
+      return;
+    }
+    const unit = match[1].toLowerCase();
+    const absAvg = Math.abs(raw[channel].avg);
+    const magnitude = absAvg > 0 ? Math.floor(Math.log10(absAvg)) : -999;
+    const key = `${unit}_${magnitude}`;
+    groups[key] = [...(groups[key] || []), channel];
+  });
+
+  const stats = {};
+  Object.values(groups).forEach((group) => {
+    const mins = group.map((channel) => raw[channel]?.min).filter((value) => value !== undefined);
+    const maxs = group.map((channel) => raw[channel]?.max).filter((value) => value !== undefined);
+    const avgs = group.map((channel) => raw[channel]?.avg).filter((value) => value !== undefined);
+    if (!mins.length || !maxs.length || !avgs.length) return;
+
+    const globalMin = Math.min(...mins);
+    const globalMax = Math.max(...maxs);
+    const globalAvg = avgs.reduce((sum, value) => sum + value, 0) / avgs.length;
+    const range = globalMax - globalMin;
+    const floor = Math.max(1, Math.abs(globalAvg) * 0.1);
+    const effectiveRange = Math.max(range, floor);
+    const center = (globalMax + globalMin) / 2;
+    const normMin = center - effectiveRange / 2;
+    const normMax = center + effectiveRange / 2;
+
+    group.forEach((channel) => {
+      stats[channel] = { ...raw[channel], normMin, normMax };
+    });
+  });
+
+  return stats;
 }
 
-function HealthRing({ score, size = 132 }) {
-  const radius = (size - 12) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const pct = score === null ? 0 : Math.max(0, Math.min(100, score));
-  const dash = (pct / 100) * circumference;
-
-  return (
-    <svg width={size} height={size} className="rotate-[-90deg]">
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        fill="none"
-        stroke="rgba(148,163,184,0.18)"
-        strokeWidth={9}
-      />
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        fill="none"
-        stroke={scoreColor(score)}
-        strokeWidth={9}
-        strokeDasharray={`${dash} ${circumference}`}
-        strokeLinecap="round"
-        style={{ transition: 'stroke-dasharray 0.55s ease' }}
-      />
-    </svg>
-  );
+function downsampleRows(rows, maxPoints) {
+  if (!Number.isFinite(maxPoints) || rows.length <= maxPoints) return rows;
+  const step = Math.ceil(rows.length / maxPoints);
+  return rows.filter((_, index) => index % step === 0);
 }
 
-function TrendTooltip({ active, payload, label }) {
-  if (!active || !payload?.length) return null;
+function buildViewerPayload(csvText, filename, settings) {
+  const parsed = parseViewerCsv(csvText);
+  if (!parsed) {
+    throw new Error('The viewer could not parse that CSV file.');
+  }
 
+  const { headers, rows } = parsed;
+  const numericChannels = detectNumericChannels(headers, rows);
+  const timeCol = detectTimeColumn(headers);
+  const maxPoints = DOWNSAMPLING_MAP[settings.downsampling] ?? 1600;
+  const sampledRows = downsampleRows(rows, maxPoints);
+  const stats = computeViewerStats(numericChannels, rows);
+  const colors = {};
+  numericChannels.forEach((channel, index) => {
+    colors[channel] = paletteColor(index);
+  });
+
+  const autoSelected = numericChannels
+    .filter((channel) => AUTO_KEYWORDS.some((keyword) => channel.toLowerCase().includes(keyword)))
+    .slice(0, 6);
+
+  return {
+    csvText,
+    filename,
+    rows: sampledRows,
+    numericChannels,
+    timeCol,
+    stats,
+    colors,
+    autoSelected: autoSelected.length ? autoSelected : numericChannels.slice(0, 4),
+  };
+}
+
+function buildSessionBars(recentLogs) {
+  const today = new Date();
+  const dayEntries = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(today);
+    date.setHours(0, 0, 0, 0);
+    date.setDate(today.getDate() - (6 - index));
+    return {
+      key: date.toISOString().slice(0, 10),
+      day: date.toLocaleDateString(undefined, { weekday: 'short' }),
+      count: 0,
+    };
+  });
+
+  recentLogs.forEach((log) => {
+    const key = new Date(log.date || log.createdAt || Date.now()).toISOString().slice(0, 10);
+    const target = dayEntries.find((entry) => entry.key === key);
+    if (target) target.count += 1;
+  });
+
+  const maxCount = Math.max(...dayEntries.map((entry) => entry.count), 1);
+  return dayEntries.map((entry) => ({
+    day: entry.day,
+    value: 12 + Math.round((entry.count / maxCount) * 31),
+    rawCount: entry.count,
+    active: entry.count === maxCount && maxCount > 0,
+  }));
+}
+
+function useCountUp(target, duration = 900) {
+  const [value, setValue] = useState(0);
+
+  useEffect(() => {
+    let frameId = 0;
+    let startTime = null;
+
+    const tick = (time) => {
+      if (startTime === null) startTime = time;
+      const progress = Math.min((time - startTime) / duration, 1);
+      setValue(Math.round(target * progress));
+      if (progress < 1) frameId = window.requestAnimationFrame(tick);
+    };
+
+    frameId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [duration, target]);
+
+  return value;
+}
+
+function EmptyState({ icon: Icon, title, body, actionLabel, onAction }) {
   return (
-    <div className="app-chart-tooltip min-w-[180px] p-3 text-xs shadow-lg">
-      <p className="mb-1 app-muted">{label}</p>
-      {payload.map((entry) => (
-        <p key={entry.dataKey} className="mt-1 font-medium app-heading">
-          <span className="app-muted">{entry.name}:</span> {entry.value ?? '—'}
-        </p>
-      ))}
+    <div className="rounded-[10px] border border-dashed border-[var(--border)] bg-[var(--bg-surface)] px-6 py-10 text-center">
+      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[var(--bg-muted)] text-[var(--text-dark-muted)]">
+        <Icon size={18} strokeWidth={1.8} />
+      </div>
+      <h3 className="mt-4 text-[14px] font-medium text-[var(--text-primary)]">{title}</h3>
+      <p className="mx-auto mt-2 max-w-[440px] text-[12px] leading-[1.6] text-[var(--text-secondary)]">{body}</p>
+      {actionLabel ? (
+        <button
+          type="button"
+          onClick={onAction}
+          className="mt-5 inline-flex items-center gap-2 rounded-[8px] bg-[var(--text-primary)] px-4 py-2 text-[12px] font-medium text-[var(--bg-page)]"
+        >
+          {actionLabel}
+          <ArrowRight size={12} strokeWidth={1.8} />
+        </button>
+      ) : null}
     </div>
   );
 }
 
-export default function Dashboard() {
-  const [recentLogs, setRecentLogs] = useState([]);
-  const [activeBlend, setActiveBlend] = useState(null);
-  const rootRef = useRef(null);
-  const navigate = useNavigate();
+function CardBadge({ label, tone }) {
+  const toneClasses = {
+    success: 'bg-[var(--success-bg)] text-[var(--success-text)]',
+    warn: 'bg-[var(--warn-bg)] text-[var(--warn-text)]',
+    danger: 'bg-[rgba(224,81,58,0.12)] text-[var(--danger-text)]',
+  };
 
-  const loadDashboardData = useCallback(() => {
-    setRecentLogs(getRecentLogs());
-    setActiveBlend(getActiveBlend());
-  }, []);
-
-  useEffect(() => {
-    loadDashboardData();
-  }, [loadDashboardData]);
-
-  const handleRefresh = useCallback(async () => {
-    await hapticLight();
-    loadDashboardData();
-  }, [loadDashboardData]);
-
-  const { pullDistance, refreshing } = usePullToRefresh(rootRef, {
-    getScrollContainer: () => rootRef.current?.closest('[data-scroll-container]') ?? null,
-    onRefresh: handleRefresh,
-  });
-
-  const mostRecentLog = recentLogs[0] || null;
-  const scoredLogs = useMemo(
-    () => recentLogs.filter((log) => log.healthScore !== null && log.healthScore !== undefined),
-    [recentLogs],
+  return (
+    <span className={`rounded-[4px] px-[7px] py-[2px] font-mono text-[10px] ${toneClasses[tone]}`}>
+      {label}
+    </span>
   );
+}
 
-  const averageHealthScore = useMemo(() => {
-    const value = average(scoredLogs.map((log) => log.healthScore));
-    return value === null ? null : Number(value.toFixed(1));
-  }, [scoredLogs]);
-
-  const mostRecentAnalysis = useMemo(
-    () => (mostRecentLog ? getLogResult(mostRecentLog.id)?.analysis ?? null : null),
-    [mostRecentLog],
+function StatCard({ label, value, detail, warn }) {
+  return (
+    <div className="rounded-[10px] border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-[14px]">
+      <p className="font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">{label}</p>
+      <div className="mt-2 flex items-center gap-2">
+        <p className="text-[24px] font-light tracking-[-0.04em] text-[var(--text-primary)]">{value}</p>
+        {warn ? <AlertCircle size={14} strokeWidth={1.8} className="shrink-0 text-[var(--danger-text)] opacity-60" /> : null}
+      </div>
+      <p className="mt-1 text-[11px] text-[var(--text-secondary)]">{detail}</p>
+    </div>
   );
+}
 
-  const boostSeries = useMemo(() => buildBoostSeries(mostRecentAnalysis), [mostRecentAnalysis]);
-  const timingSeries = useMemo(() => buildTimingSeries(mostRecentAnalysis), [mostRecentAnalysis]);
-
-  const recentLogCards = useMemo(
-    () => recentLogs.slice(0, 3).map((log) => {
-      const analysis = getLogResult(log.id)?.analysis ?? null;
-      const peakBoost = maxFinite((analysis?.chartData || []).map((point) => Number(point?.boost)));
-      const peakTiming = analysis?.metrics?.timingCorrections?.max_correction ?? log.timingPull ?? null;
-      return {
-        ...log,
-        peakBoost: peakBoost !== null ? Number(peakBoost.toFixed(1)) : null,
-        peakTiming: Number.isFinite(Number(peakTiming)) ? Number(peakTiming) : null,
-      };
-    }),
-    [recentLogs],
+function SurfaceSection({ title, subtitle, action, children }) {
+  return (
+    <section className="rounded-[10px] border border-[var(--border)] bg-[var(--bg-surface)]">
+      <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-[14px]">
+        <div className="min-w-0">
+          <h2 className="text-[13px] font-medium text-[var(--text-primary)]">{title}</h2>
+          {subtitle ? <p className="mt-1 text-[11px] text-[var(--text-secondary)]">{subtitle}</p> : null}
+        </div>
+        {action}
+      </div>
+      <div className="px-4 py-4">{children}</div>
+    </section>
   );
+}
 
-  const healthBreakdown = mostRecentLog ? [
-    { label: 'Status', value: mostRecentLog.status },
-    { label: 'Timing Pull', value: mostRecentLog.timingPull !== null && mostRecentLog.timingPull !== undefined ? `${mostRecentLog.timingPull}°` : '—' },
-    { label: 'AFR Floor', value: mostRecentLog.afr ? String(mostRecentLog.afr) : '—' },
-    { label: 'Recent Logs', value: `${recentLogs.length}` },
-  ] : [];
-
-  const peakBoost = useMemo(
-    () => maxFinite((mostRecentAnalysis?.chartData || []).map((point) => Number(point?.boost))),
-    [mostRecentAnalysis],
+function FieldShell({ label, children, hint }) {
+  return (
+    <label className="block">
+      <span className="font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">{label}</span>
+      {children}
+      {hint ? <span className="mt-1 block text-[10px] text-[var(--text-muted)]">{hint}</span> : null}
+    </label>
   );
+}
 
-  const worstTiming = useMemo(
-    () => minFinite(timingSeries.map((point) => Number(point.pull))),
-    [timingSeries],
+function StudioInput(props) {
+  return (
+    <input
+      {...props}
+      className={`mt-2 w-full rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-2 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] ${props.className || ''}`}
+    />
+  );
+}
+
+function StudioTextarea(props) {
+  return (
+    <textarea
+      {...props}
+      className={`mt-2 w-full rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-2 text-[12px] leading-[1.6] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] ${props.className || ''}`}
+    />
+  );
+}
+
+function StudioSelect({ children, className = '', ...props }) {
+  return (
+    <div className="relative mt-2">
+      <select
+        {...props}
+        className={`w-full appearance-none rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-2 pr-9 text-[12px] text-[var(--text-primary)] outline-none ${className}`}
+      >
+        {children}
+      </select>
+      <ChevronDown size={12} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+    </div>
+  );
+}
+
+function StatusBadge({ status }) {
+  return <CardBadge label={statusLabel(status)} tone={statusTone(status)} />;
+}
+
+function StandardCard({ card }) {
+  const content = (
+    <>
+      <h3 className="mb-[5px] truncate text-[12px] font-medium text-[var(--text-primary)]">{card.title}</h3>
+      <p
+        className="mb-3 overflow-hidden text-[11px] leading-[1.55] text-[var(--text-secondary)]"
+        style={{
+          display: '-webkit-box',
+          WebkitLineClamp: 1,
+          WebkitBoxOrient: 'vertical',
+        }}
+      >
+        {card.body}
+      </p>
+
+      {card.badges?.length ? (
+        <div className="mb-3 flex flex-wrap gap-1.5">
+          {card.badges.map((badge) => (
+            <CardBadge key={`${card.title}_${badge.label}`} label={badge.label} tone={badge.tone} />
+          ))}
+        </div>
+      ) : null}
+
+      <div className="flex items-center justify-between gap-3 font-mono text-[10px] text-[var(--text-muted)]">
+        <div className="flex items-center gap-1.5">
+          <CalendarDays size={11} strokeWidth={1.8} />
+          <span>{card.date}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <ArrowUpRight size={11} strokeWidth={1.8} />
+          <span>{card.counters.primary}</span>
+        </div>
+      </div>
+    </>
   );
 
   return (
-    <div
-      ref={rootRef}
-      className="relative space-y-6 xl:space-y-7"
-      style={{
-        transform: pullDistance > 0 ? `translateY(${Math.min(pullDistance, 84) / 3}px)` : 'translateY(0)',
-        transition: refreshing ? 'transform 0.22s ease' : 'none',
-      }}
+    <motion.article
+      variants={itemVariants}
+      whileHover={{ y: -2, boxShadow: '0 4px 16px rgba(0,0,0,0.06)' }}
+      transition={{ duration: 0.15 }}
+      className="rounded-[10px] border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-[14px]"
     >
-      {(pullDistance > 0 || refreshing) && (
-        <div className="absolute left-1/2 top-0 z-20 -translate-x-1/2 -translate-y-1/2">
-          <div className="app-pill px-3 py-1.5 text-[11px] font-semibold">
-            {refreshing ? 'Refreshing dashboard…' : pullDistance >= 70 ? 'Release to refresh' : 'Pull to refresh'}
+      {card.onClick ? (
+        <button type="button" onClick={card.onClick} className="block w-full text-left">
+          {content}
+        </button>
+      ) : (
+        content
+      )}
+    </motion.article>
+  );
+}
+
+const CHANGE_TYPE = {
+  new:      { label: 'New',      cls: 'bg-[var(--selection)] text-[var(--text-primary)]' },
+  improved: { label: 'Improved', cls: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' },
+  fixed:    { label: 'Fixed',    cls: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' },
+};
+const PLATFORM_TYPE = {
+  web:  { label: 'Web',     cls: 'bg-blue-500/10 text-blue-600 dark:text-blue-400' },
+  ios:  { label: 'iOS',     cls: 'bg-purple-500/10 text-purple-600 dark:text-purple-400' },
+  both: { label: 'Web+iOS', cls: 'bg-[var(--border)] text-[var(--text-muted)]' },
+};
+
+function UpdateLogWorkspace({ searchQuery }) {
+  const [entries, setEntries] = useState([]);
+  const [platformFilter, setPlatformFilter] = useState('all');
+  const deferredSearch = useDeferredValue(searchQuery);
+
+  useEffect(() => {
+    fetch('/CHANGELOG.json')
+      .then(r => r.json())
+      .then(data => setEntries(data))
+      .catch(() => {});
+  }, []);
+
+  const filtered = entries
+    .map(entry => {
+      const changes = (entry.changes || []).filter(c => {
+        const platform = c.platform || 'both';
+        const platformOk =
+          platformFilter === 'all' ? true :
+          platformFilter === 'web' ? platform === 'web' :
+          platform === 'ios';
+        const searchOk = !deferredSearch || c.text.toLowerCase().includes(deferredSearch.toLowerCase()) ||
+          entry.title.toLowerCase().includes(deferredSearch.toLowerCase());
+        return platformOk && searchOk;
+      });
+      return { ...entry, changes };
+    })
+    .filter(e => e.changes.length > 0);
+
+  return (
+    <motion.div variants={itemVariants} className="flex-1 overflow-auto bg-[var(--bg-page)] px-6 py-[22px]">
+      <div className="mx-auto max-w-2xl space-y-6">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-[22px] font-semibold tracking-[-0.03em] text-[var(--text-primary)]">Update log</h1>
+            <p className="mt-1 text-[13px] text-[var(--text-secondary)]">Every release, what changed, and where.</p>
+          </div>
+          {entries[0] && (
+            <span className="shrink-0 rounded-full border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-1 font-mono text-[11px] text-[var(--text-muted)]">
+              v{entries[0].version}
+            </span>
+          )}
+        </div>
+
+        {/* Platform filter */}
+        <div className="flex gap-2">
+          {['all', 'web', 'ios'].map(f => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setPlatformFilter(f)}
+              className={`rounded-full border px-3 py-1 font-mono text-[11px] capitalize transition-colors ${
+                platformFilter === f
+                  ? 'border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-page)]'
+                  : 'border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:border-[var(--text-secondary)]'
+              }`}
+            >
+              {f === 'all' ? 'All platforms' : f === 'ios' ? 'iOS' : 'Web'}
+            </button>
+          ))}
+        </div>
+
+        {/* Entries */}
+        {filtered.length === 0 && (
+          <div className="py-16 text-center text-[13px] text-[var(--text-muted)]">No entries match this filter.</div>
+        )}
+        {filtered.map((entry, idx) => (
+          <div key={entry.version} className="rounded-[12px] border border-[var(--border)] bg-[var(--bg-surface)] overflow-hidden">
+            <div className="flex items-center gap-3 border-b border-[var(--border)] px-5 py-4">
+              {idx === 0
+                ? <Zap size={13} strokeWidth={1.8} className="shrink-0 text-[var(--text-primary)]" />
+                : <ArrowUpCircle size={13} strokeWidth={1.8} className="shrink-0 text-[var(--text-muted)]" />}
+              <div className="flex-1 min-w-0">
+                <p className="text-[13px] font-medium text-[var(--text-primary)] truncate">{entry.title}</p>
+                <p className="font-mono text-[10px] text-[var(--text-muted)]">v{entry.version}</p>
+              </div>
+              <span className="shrink-0 font-mono text-[11px] text-[var(--text-muted)]">{entry.date}</span>
+            </div>
+            <ul className="divide-y divide-[var(--border)]">
+              {entry.changes.map((c, i) => {
+                const type = CHANGE_TYPE[c.type] || CHANGE_TYPE.new;
+                const platform = PLATFORM_TYPE[c.platform || 'both'] || PLATFORM_TYPE.both;
+                return (
+                  <li key={i} className="flex items-start gap-3 px-5 py-3">
+                    <span className={`mt-0.5 shrink-0 rounded px-[6px] py-[2px] font-mono text-[9px] font-semibold uppercase ${type.cls}`}>
+                      {type.label}
+                    </span>
+                    <span className="flex-1 text-[12px] leading-[1.6] text-[var(--text-secondary)]">{c.text}</span>
+                    <span className={`mt-0.5 shrink-0 rounded px-[6px] py-[2px] font-mono text-[9px] font-semibold uppercase ${platform.cls}`}>
+                      {platform.label}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
+function FlaggedCard({ card }) {
+  return (
+    <motion.article
+      variants={itemVariants}
+      initial={{ opacity: 0, scale: 0.97 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ type: 'spring', stiffness: 220, damping: 22 }}
+      className="rounded-[10px] border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-[14px]"
+    >
+      <button type="button" onClick={card.onClick} className="block w-full text-left">
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-[12px] font-medium text-[var(--text-primary)]">{card.title}</h3>
+            <p className="mt-1 text-[11px] leading-[1.55] text-[var(--text-secondary)]">{card.body}</p>
+          </div>
+          <AlertCircle size={14} className="shrink-0 text-[var(--danger-text)]" strokeWidth={1.8} />
+        </div>
+
+        <div className="rounded-[7px] bg-[var(--bg-muted)] px-3 py-[10px] font-mono text-[11px] leading-[1.7]">
+          {card.codeRows.map((row) => (
+            <div key={row.label} className="flex justify-between">
+              <span className="text-[var(--text-muted)]">{row.label}</span>
+              <span className={row.valueClass}>{row.value}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-3 flex items-center justify-between font-mono text-[10px] text-[var(--text-muted)]">
+          <span>{card.date}</span>
+          <span>{card.footer}</span>
+        </div>
+      </button>
+    </motion.article>
+  );
+}
+
+function NavContent({ navGroups, activeView, onSelect, setMobileOpen, initials, displayName, layoutPrefix, animated = true }) {
+  return (
+    <>
+      <div className="space-y-5">
+        {navGroups.map((group) => (
+          <div key={group.label} className="space-y-2">
+            <p className="font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--text-muted)]">{group.label}</p>
+            <div className="space-y-1">
+              {group.items.map((item) => {
+                const Icon = item.icon;
+                const isActive = activeView === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => { onSelect(item.id); setMobileOpen(false); }}
+                    className={`relative flex w-full items-center gap-3 overflow-hidden rounded-[8px] px-[10px] py-[7px] text-left transition-colors ${
+                      isActive ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-muted)]'
+                    }`}
+                  >
+                    {isActive ? (
+                      animated ? (
+                        <motion.div
+                          layoutId={`active-nav-pill-${layoutPrefix}`}
+                          className="absolute inset-0 rounded-[8px] bg-[var(--bg-page)]"
+                          transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                        />
+                      ) : (
+                        <div className="absolute inset-0 rounded-[8px] bg-[var(--bg-page)]" />
+                      )
+                    ) : null}
+                    <div className="relative z-10 flex flex-1 items-center gap-3">
+                      <Icon size={14} strokeWidth={1.8} />
+                      <span className={`text-[13px] ${isActive ? 'font-medium' : 'font-normal'}`}>{item.name}</span>
+                    </div>
+                    {item.badge ? (
+                      <span className="relative z-10 rounded-full bg-[var(--text-primary)] px-[6px] py-[1px] font-mono text-[10px] text-[var(--bg-page)]">
+                        {item.badge}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-auto border-t border-[var(--border)] pt-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--border)] font-mono text-[10px] text-[var(--text-dark-muted)]">
+            {initials}
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-[12px] font-medium text-[var(--text-primary)]">{displayName}</p>
+            <p className="truncate font-mono text-[10px] text-[var(--text-muted)]">studio operator</p>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function Sidebar({ activeView, onSelect, snapshot }) {
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const riskCount = snapshot.recentLogs.filter((log) => log.status === 'Risk').length;
+  const displayName = snapshot.settings.displayName || 'B58 Enthusiast';
+  const initials = displayName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((word) => word[0].toUpperCase())
+    .join('') || 'B5';
+  const garageCount = snapshot.garageLogs.length;
+  const navGroups = [
+    {
+      label: 'Studio',
+      items: [
+        { id: 'dashboard', name: 'Dashboard', icon: LayoutDashboard },
+        { id: 'analyzer', name: 'Log analyzer', icon: Activity, badge: riskCount ? String(riskCount) : null },
+        { id: 'viewer', name: 'Log viewer', icon: MonitorPlay },
+      ],
+    },
+    {
+      label: 'Signals',
+      items: [
+        { id: 'calculator', name: 'Blend lab', icon: CalculatorIcon },
+        { id: 'garage', name: 'Garage', icon: Car },
+        { id: 'archive', name: 'Archive', icon: FolderArchive, badge: garageCount ? String(garageCount) : null },
+        { id: 'updates', name: 'Update log', icon: Sparkles },
+        { id: 'settings', name: 'Settings', icon: Settings2 },
+      ],
+    },
+  ];
+
+  return (
+    <aside className="relative flex w-full shrink-0 flex-col border-b border-[var(--border)] bg-[var(--bg-surface)] md:h-screen md:w-[200px] md:border-b-0 md:border-r">
+      <div
+        className="flex items-center justify-between border-b border-[var(--border)] px-[18px] pb-[22px]"
+        style={{ paddingTop: 'calc(env(safe-area-inset-top) + 22px)' }}
+      >
+        <button
+          type="button"
+          onClick={() => setMobileOpen((prev) => !prev)}
+          className="flex items-center justify-center rounded-[6px] p-1 text-[var(--text-muted)] hover:bg-[var(--bg-muted)] md:hidden"
+          aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
+        >
+          <span style={{ display: 'grid', placeItems: 'center' }}>
+            <Menu size={16} strokeWidth={1.8} style={{ gridArea: '1/1', transition: 'opacity 0.15s ease, transform 0.15s ease', opacity: mobileOpen ? 0 : 1, transform: mobileOpen ? 'rotate(45deg) scale(0.7)' : 'none' }} />
+            <X    size={16} strokeWidth={1.8} style={{ gridArea: '1/1', transition: 'opacity 0.15s ease, transform 0.15s ease', opacity: mobileOpen ? 1 : 0, transform: mobileOpen ? 'none' : 'rotate(-45deg) scale(0.7)' }} />
+          </span>
+        </button>
+        <div className="flex items-center text-[var(--text-primary)]">
+          {/* E mark — viewBox cropped tight to glyph so it kerned like a real letter */}
+          <svg height="14" viewBox="53 41 99 118" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ display: 'block', position: 'relative', top: '-1px' }}>
+            <g fill="none" stroke="currentColor" strokeWidth="10" strokeLinecap="square" strokeLinejoin="miter">
+              <line x1="64" y1="52" x2="140" y2="52"/>
+              <line x1="64" y1="148" x2="140" y2="148"/>
+              <line x1="64" y1="52" x2="64" y2="148"/>
+            </g>
+            <path d="M64 100 L80 100 C86 100 88 84 100 84 C112 84 114 116 120 116 C126 116 128 100 134 100 L140 100"
+              fill="none" stroke="currentColor" strokeWidth="10" strokeLinecap="butt" strokeLinejoin="round"/>
+          </svg>
+          <p className="text-[15px] font-medium tracking-[-0.02em]">thos</p>
+        </div>
+      </div>
+
+      {/* Desktop nav — always visible */}
+      <div className="hidden flex-1 flex-col px-[18px] py-4 md:flex">
+        <NavContent navGroups={navGroups} activeView={activeView} onSelect={onSelect} setMobileOpen={setMobileOpen} initials={initials} displayName={displayName} layoutPrefix="desktop" />
+      </div>
+
+      {/* Mobile nav — absolute so it overlays content (no layout shift), scaleY+opacity GPU-composited */}
+      <div
+        className="md:hidden absolute left-0 right-0 z-50 overflow-hidden border-b border-[var(--border)] bg-[var(--bg-surface)]"
+        style={{
+          top: '100%',
+          transform: mobileOpen ? 'scaleY(1)' : 'scaleY(0)',
+          transformOrigin: 'top',
+          opacity: mobileOpen ? 1 : 0,
+          pointerEvents: mobileOpen ? 'auto' : 'none',
+          transition: 'transform 0.22s cubic-bezier(0.4,0,0.2,1), opacity 0.18s ease',
+          willChange: 'transform, opacity',
+        }}
+      >
+        <div className="px-[18px] py-4">
+          <NavContent navGroups={navGroups} activeView={activeView} onSelect={onSelect} setMobileOpen={setMobileOpen} initials={initials} displayName={displayName} layoutPrefix="mobile" animated={false} />
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function Topbar({ activeView, searchQuery, onSearchChange, filterActive, onToggleFilter, onUpload }) {
+  const placeholders = {
+    dashboard: 'Search logs, sessions, and saved fuel work',
+    analyzer: 'Search diagnostics, notes, and metrics',
+    viewer: 'Search telemetry channels',
+    calculator: 'Search blend profiles and stations',
+    garage: 'Search filenames, tags, and notes',
+    settings: 'Search preferences and profile fields',
+  };
+
+  return (
+    <motion.div
+      variants={itemVariants}
+      className="flex flex-col gap-3 border-b border-[var(--border)] bg-[var(--bg-surface)] px-6 py-3 md:h-[52px] md:flex-row md:items-center md:justify-between md:gap-4"
+    >
+      <label className="flex flex-1 items-center gap-2 rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-[7px]">
+        <Search size={13} className="text-[var(--text-muted)]" strokeWidth={1.8} />
+        <input
+          type="search"
+          value={searchQuery}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder={placeholders[activeView]}
+          className="w-full border-0 bg-transparent p-0 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+        />
+      </label>
+
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onToggleFilter}
+          className={`inline-flex items-center gap-2 rounded-[8px] border px-3 py-[7px] text-[12px] transition-colors ${
+            filterActive
+              ? 'border-[var(--text-primary)] bg-[var(--bg-page)] text-[var(--text-primary)]'
+              : 'border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-dark-muted)] hover:bg-[var(--bg-muted)]'
+          }`}
+        >
+          <ListFilter size={12} strokeWidth={1.8} />
+          Filter
+        </button>
+
+        <motion.button
+          type="button"
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.97 }}
+          onClick={onUpload}
+          className="inline-flex items-center gap-2 rounded-[8px] bg-[var(--text-primary)] px-[14px] py-[7px] text-[12px] font-medium text-[var(--bg-page)] shadow-[0_10px_24px_var(--selection)]"
+        >
+          <Upload size={12} strokeWidth={1.8} />
+          Upload Log
+        </motion.button>
+      </div>
+    </motion.div>
+  );
+}
+
+function PullSessionsChart({ bars }) {
+  return (
+    <div className="flex h-full flex-col">
+      <p className="mb-3 text-[12px] font-medium text-[var(--text-primary)]">Pull sessions</p>
+      <div className="flex h-11 items-end gap-[5px]">
+        {bars.map((bar, index) => (
+          <motion.div
+            key={bar.day}
+            initial={{ scaleY: 0 }}
+            animate={{ scaleY: 1 }}
+            style={{
+              transformOrigin: 'bottom',
+              height: `${bar.value}px`,
+              backgroundColor: bar.active ? 'var(--text-primary)' : 'var(--border)',
+            }}
+            transition={{ delay: index * 0.05, duration: 0.4, ease: 'easeOut' }}
+            className="flex-1 rounded-t-[3px]"
+          />
+        ))}
+      </div>
+      <div className="mt-2 grid grid-cols-7 gap-[5px]">
+        {bars.map((bar) => (
+          <span key={bar.day} className="text-center font-mono text-[10px] text-[var(--text-muted)]">
+            {bar.day}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TuneHealthGauge({ healthScore }) {
+  const radius = 30;
+  const arcLength = Math.PI * radius;
+  const progress = Math.max(0.1, Math.min((healthScore || 0) / 100, 1));
+
+  return (
+    <div className="flex h-full flex-col items-center justify-center">
+      <svg viewBox="0 0 80 48" className="h-12 w-20 overflow-visible">
+        <path d="M10 42 A30 30 0 0 1 70 42" fill="none" stroke="var(--border)" strokeWidth="6" strokeLinecap="round" />
+        <motion.path
+          d="M10 42 A30 30 0 0 1 70 42"
+          fill="none"
+          stroke="var(--text-primary)"
+          strokeWidth="6"
+          strokeLinecap="round"
+          strokeDasharray={arcLength}
+          initial={{ strokeDashoffset: arcLength }}
+          animate={{ strokeDashoffset: arcLength * (1 - progress) }}
+          transition={{ duration: 0.7, ease: 'easeOut', delay: 0.2 }}
+        />
+      </svg>
+      <p className="mt-1 text-[15px] font-medium text-[var(--text-primary)]">{formatMetric(healthScore, '%', 1)}</p>
+      <p className="mt-1 font-mono text-[10px] text-[var(--text-muted)]">Tune health</p>
+    </div>
+  );
+}
+
+function NumericStat({ label, target, detail }) {
+  const value = useCountUp(target);
+  return (
+    <div className="flex h-full flex-col justify-center">
+      <p className="font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">{label}</p>
+      <p className="mt-2 text-[30px] font-light tracking-[-0.04em] text-[var(--text-primary)]">{value}</p>
+      <div className="mt-2 flex items-center gap-1 text-[11px] text-[var(--text-muted)]">
+        <ArrowUpRight size={11} strokeWidth={1.8} />
+        <span>{detail}</span>
+      </div>
+    </div>
+  );
+}
+
+function StatsStrip({ snapshot }) {
+  const recentHealth = snapshot.recentLogs.filter((log) => Number.isFinite(Number(log.healthScore)));
+  const avgHealth = recentHealth.length
+    ? recentHealth.reduce((sum, log) => sum + Number(log.healthScore), 0) / recentHealth.length
+    : 0;
+  const flaggedCount = snapshot.recentLogs.filter((log) => log.status !== 'Safe').length;
+  const garageCount = snapshot.garageLogs.length;
+  const bars = buildSessionBars(snapshot.recentLogs);
+
+  return (
+    <motion.div
+      variants={itemVariants}
+      className="grid border-b border-[var(--border)] bg-[var(--bg-surface)] px-6 py-5 md:h-[100px] md:grid-cols-4"
+    >
+      <div className="border-b border-[var(--border)] pb-5 md:border-b-0 md:border-r md:pb-0 md:pr-6">
+        <PullSessionsChart bars={bars} />
+      </div>
+      <div className="border-b border-[var(--border)] py-5 md:border-b-0 md:border-r md:px-6 md:py-0">
+        <TuneHealthGauge healthScore={avgHealth} />
+      </div>
+      <div className="border-b border-[var(--border)] py-5 md:border-b-0 md:border-r md:px-6 md:py-0">
+        <NumericStat label="Flagged pulls" target={flaggedCount} detail={`${snapshot.recentLogs.length} recent sessions tracked`} />
+      </div>
+      <div className="pt-5 md:pl-6 md:pt-0">
+        <NumericStat label="Garage logs" target={garageCount} detail={`${Object.keys(snapshot.profiles).length} saved fuel profiles`} />
+      </div>
+    </motion.div>
+  );
+}
+
+function KanbanColumn({ column }) {
+  return (
+    <motion.section variants={itemVariants}>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h2 className="text-[13px] font-medium text-[var(--text-primary)]">{column.title}</h2>
+        <div className="inline-flex items-center gap-1 rounded-[6px] border border-[var(--border)] bg-[var(--bg-surface)] px-[8px] py-[3px] font-mono text-[10px] text-[var(--text-secondary)]">
+          <ArrowUpDown size={10} strokeWidth={1.8} />
+          {column.count}
+        </div>
+      </div>
+
+      <motion.div variants={containerVariants} className="space-y-[10px]">
+        {column.cards.length ? column.cards.map((card) => (
+          card.kind === 'dark' ? <FlaggedCard key={card.title} card={card} /> : <StandardCard key={card.title} card={card} />
+        )) : (
+          <div className="rounded-[10px] border border-dashed border-[var(--border)] bg-[var(--bg-surface)] px-4 py-8 text-center">
+            <p className="text-[11px] text-[var(--text-secondary)]">Nothing to show yet.</p>
+          </div>
+        )}
+      </motion.div>
+    </motion.section>
+  );
+}
+
+function DashboardOverview({ snapshot, searchQuery, filterActive, onOpenAnalysis, onOpenGarage, onOpenCalculator }) {
+  const filteredSearch = searchQuery.trim().toLowerCase();
+  const flaggedLogs = snapshot.recentLogs.filter((log) => log.status !== 'Safe');
+  const activeBlend = snapshot.activeBlend;
+  const profileEntries = Object.entries(snapshot.profiles);
+
+  const queueCards = snapshot.recentLogs
+    .filter((log) => !filterActive || log.status !== 'Safe')
+    .filter((log) => !filteredSearch || `${log.filename} ${log.engine} ${log.tune}`.toLowerCase().includes(filteredSearch))
+    .slice(0, 3)
+    .map((log) => ({
+      title: log.filename,
+      body: `${log.engine} · ${log.tune} · E${log.ethanol}. Last status ${log.status.toLowerCase()} with health score ${log.healthScore ?? '—'}.`,
+      badges: [{ label: log.status.toLowerCase(), tone: statusTone(log.status) }],
+      date: formatDate(log.date),
+      counters: {
+        primary: log.healthScore ?? '—',
+        secondary: log.rowCount ?? '—',
+      },
+      onClick: () => onOpenAnalysis(log.id),
+    }));
+
+  const analysisCards = snapshot.garageLogs
+    .filter((log) => !filteredSearch || `${log.filename} ${log.notes || ''}`.toLowerCase().includes(filteredSearch))
+    .slice(0, 3)
+    .map((log) => ({
+      title: log.filename,
+      body: `${log.engine} archive entry with ${log.tags?.length || 0} tags. ${log.notes || 'Ready to reopen in the analyzer or viewer.'}`,
+      badges: [{ label: log.status.toLowerCase(), tone: statusTone(log.status) }],
+      date: formatDate(log.createdAt),
+      counters: {
+        primary: log.healthScore ?? '—',
+        secondary: log.tags?.length || 0,
+      },
+      onClick: () => onOpenGarage(log.id),
+    }));
+
+  const flaggedCards = flaggedLogs
+    .filter((log) => !filteredSearch || `${log.filename} ${log.status}`.toLowerCase().includes(filteredSearch))
+    .slice(0, 3)
+    .map((log, index) => {
+      const analysis = getLogResult(log.id)?.analysis;
+      const metrics = analysis?.metrics || {};
+      const summaryNote = analysis?.summary?.notes?.[0] || 'High-load review required before release.';
+      return {
+        kind: index === 0 ? 'dark' : 'standard',
+        title: log.filename,
+        body: summaryNote,
+        codeRows: [
+          {
+            label: 'timing',
+            value: formatMetric(metrics.timingCorrections?.max_correction, ' deg', 1),
+            valueClass: 'text-[var(--danger-text)]',
+          },
+          {
+            label: 'hpfp drop',
+            value: formatMetric(metrics.hpfp?.max_drop_pct, '%', 1),
+            valueClass: 'text-[var(--accent-yellow)]',
+          },
+          {
+            label: 'iat peak',
+            value: formatMetric(metrics.iat?.peak_f, ' F', 0),
+            valueClass: 'text-[#5eca8a]',
+          },
+        ],
+        date: formatDate(log.date),
+        footer: 'open analysis',
+        onClick: () => onOpenAnalysis(log.id),
+        badges: [{ label: log.status.toLowerCase(), tone: statusTone(log.status) }],
+        counters: { primary: log.healthScore ?? '—', secondary: log.rowCount ?? '—' },
+      };
+    })
+    .map((card) => (card.kind === 'standard'
+      ? {
+          title: card.title,
+          body: card.body,
+          badges: card.badges,
+          date: card.date,
+          counters: card.counters,
+          onClick: card.onClick,
+        }
+      : card));
+
+  const fuelCards = [
+    activeBlend
+      ? {
+          title: `Active blend · E${activeBlend.resultingBlend}`,
+          body: `${formatVolume(activeBlend.e85Gallons, snapshot.settings.units)} E85 and ${formatVolume(activeBlend.pumpGallons, snapshot.settings.units)} pump saved from the latest calculation.`,
+          badges: [{ label: `${activeBlend.resultingOctane || '—'} aki`, tone: 'success' }],
+          date: formatDate(activeBlend.date),
+          counters: {
+            primary: activeBlend.pumpOctane ?? '—',
+            secondary: activeBlend.pumpEthanol ?? '—',
+          },
+          onClick: onOpenCalculator,
+        }
+      : null,
+    ...profileEntries.slice(0, 2).map(([name, profile]) => ({
+      title: name,
+      body: `Saved target E${profile.targetE} recipe with tank size ${profile.tankSize} gal and pump ethanol ${profile.pumpEthanol}%.`,
+      badges: [{ label: 'profile', tone: 'warn' }],
+      date: formatDate(profile.savedAt),
+      counters: {
+        primary: profile.targetE ?? '—',
+        secondary: profile.currentFuel ?? '—',
+      },
+      onClick: onOpenCalculator,
+    })),
+  ]
+    .filter(Boolean)
+    .filter((card) => !filteredSearch || `${card.title} ${card.body}`.toLowerCase().includes(filteredSearch));
+
+  const columns = [
+    { title: 'Queued', count: String(queueCards.length).padStart(2, '0'), cards: queueCards },
+    { title: 'Library', count: String(analysisCards.length).padStart(2, '0'), cards: analysisCards },
+    { title: 'Flagged', count: String(flaggedCards.length).padStart(2, '0'), cards: flaggedCards },
+    { title: 'Fuel', count: String(fuelCards.length).padStart(2, '0'), cards: fuelCards },
+  ];
+
+  const [mobileTab, setMobileTab] = useState(columns[0].title);
+  const activeColumn = columns.find((c) => c.title === mobileTab) ?? columns[0];
+
+  return (
+    <motion.div variants={itemVariants} className="flex-1 overflow-auto bg-[var(--bg-page)]">
+      {/* Mobile: tab bar + single column */}
+      <div className="md:hidden">
+        <div className="flex gap-1 border-b border-[var(--border)] px-4 pt-4 pb-0">
+          {columns.map((col) => (
+            <button
+              key={col.title}
+              onClick={() => setMobileTab(col.title)}
+              className={`flex items-center gap-1.5 rounded-t-[8px] px-3 py-2 text-[11px] font-semibold transition-colors ${
+                mobileTab === col.title
+                  ? 'bg-[var(--bg-surface)] border border-b-0 border-[var(--border)] text-[var(--text-primary)]'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+              }`}
+            >
+              {col.title}
+              <span className="font-mono text-[9px] opacity-60">{col.count}</span>
+            </button>
+          ))}
+        </div>
+        <div className="px-4 py-4">
+          <motion.div variants={containerVariants} className="space-y-[10px]">
+            {activeColumn.cards.length ? activeColumn.cards.map((card) => (
+              card.kind === 'dark' ? <FlaggedCard key={card.title} card={card} /> : <StandardCard key={card.title} card={card} />
+            )) : (
+              <div className="rounded-[10px] border border-dashed border-[var(--border)] bg-[var(--bg-surface)] px-4 py-8 text-center">
+                <p className="text-[11px] text-[var(--text-secondary)]">Nothing to show yet.</p>
+              </div>
+            )}
+          </motion.div>
+        </div>
+      </div>
+
+      {/* Desktop: 4-column kanban grid */}
+      <motion.div variants={containerVariants} className="hidden md:grid min-w-[760px] grid-cols-4 gap-[14px] px-6 py-[22px]">
+        {columns.map((column) => (
+          <KanbanColumn key={column.title} column={column} />
+        ))}
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function AnalyzerSummary({ analysis }) {
+  const metrics = analysis.metrics;
+  return (
+    <div className="grid gap-3 md:grid-cols-5">
+      <StatCard label="Status" value={analysis.status} detail={analysis.filename} />
+      <StatCard label="AFR" value={formatMetric(metrics.afr.actual, ':1', 2)} detail={metrics.afr.note || 'AFR stayed within target windows.'} />
+      <StatCard label="HPFP drop" value={formatMetric(metrics.hpfp.max_drop_pct, '%', 1)} detail={metrics.hpfp.note || 'Rail pressure remained stable.'} warn={metrics.hpfp.status === 'Risk'} />
+      <StatCard label="IAT peak" value={formatMetric(metrics.iat.peak_f, 'F', 0)} detail={metrics.iat.note || 'Charge temps look controlled.'} />
+      <StatCard label="Timing" value={formatMetric(metrics.timingCorrections.max_correction, ' deg', 1)} detail={metrics.timingCorrections.note || 'No corrections were observed under load.'} />
+    </div>
+  );
+}
+
+function TelemetryTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 shadow-[0_12px_24px_rgba(0,0,0,0.08)]">
+      <p className="font-mono text-[10px] text-[var(--text-muted)]">time {label}s</p>
+      <div className="mt-2 space-y-1">
+        {payload.map((entry) => (
+          <div key={entry.dataKey} className="flex items-center justify-between gap-3 text-[11px]">
+            <span className="text-[var(--text-secondary)]">{entry.name}</span>
+            <span className="font-mono text-[var(--text-primary)]">{entry.value ?? '—'}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AnalyzerWorkspace({
+  carDetails,
+  onCarDetailsChange,
+  analysisState,
+  onUpload,
+  onCompareUpload,
+  onReset,
+  onOpenViewer,
+  searchQuery,
+  filterActive,
+}) {
+  const filteredSearch = searchQuery.trim().toLowerCase();
+  const analysis = analysisState.analysis;
+  const compareAnalysis = analysisState.compareAnalysis;
+  const diagnostics = useMemo(() => {
+    if (!analysis?.diagnostics) return [];
+    return analysis.diagnostics.filter((item) => {
+      if (filterActive && item.severity === 'Safe') return false;
+      if (!filteredSearch) return true;
+      return `${item.title} ${item.evidence} ${(item.likelyCauses || []).join(' ')} ${(item.recommendedChecks || []).join(' ')}`
+        .toLowerCase()
+        .includes(filteredSearch);
+    });
+  }, [analysis, filterActive, filteredSearch]);
+
+  const keyPoints = useMemo(() => {
+    if (!analysis?.keyPoints) return [];
+    return analysis.keyPoints.filter((point) => (!filteredSearch ? true : point.toLowerCase().includes(filteredSearch)));
+  }, [analysis, filteredSearch]);
+
+  const compareData = useMemo(() => mergeCompareChartData(analysis, compareAnalysis), [analysis, compareAnalysis]);
+
+  return (
+    <motion.div variants={itemVariants} className="flex-1 overflow-auto bg-[var(--bg-page)] px-6 py-[22px]">
+      <div className="space-y-4">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(280px,0.7fr)]">
+          <SurfaceSection
+            title="Analyzer workspace"
+            subtitle="Upload a CSV, run the parser, and archive the result in one pass."
+            action={analysis ? <StatusBadge status={analysis.status} /> : null}
+          >
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-3">
+                <p className="font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">Session actions</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button type="button" onClick={onUpload} className="rounded-[8px] bg-[var(--text-primary)] px-3 py-2 text-[12px] font-medium text-[var(--bg-page)]">
+                    Upload CSV
+                  </button>
+                  <button type="button" onClick={onCompareUpload} className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-[12px] text-[var(--text-primary)]">
+                    Compare pull
+                  </button>
+                  <button type="button" onClick={onOpenViewer} disabled={!analysisState.csvText} className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-[12px] text-[var(--text-primary)] disabled:opacity-40">
+                    Open in viewer
+                  </button>
+                  <button type="button" onClick={onReset} className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-[12px] text-[var(--text-primary)]">
+                    Reset
+                  </button>
+                </div>
+                {analysisState.loading ? (
+                  <div className="mt-3 flex items-center gap-2">
+                    <span className="spinner" />
+                    <p className="text-[11px] text-[var(--text-secondary)]">Parsing and analyzing…</p>
+                  </div>
+                ) : null}
+                {analysisState.error ? <p className="mt-3 text-[11px] text-[var(--danger-text)]">{analysisState.error}</p> : null}
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                <FieldShell label="Fuel blend">
+                  <StudioSelect value={carDetails.ethanol} onChange={(event) => onCarDetailsChange('ethanol', Number(event.target.value))}>
+                    <option value="">Select</option>
+                    {[0, 10, 20, 30, 40, 50, 60, 85].map((value) => (
+                      <option key={value} value={value}>
+                        E{value}
+                      </option>
+                    ))}
+                  </StudioSelect>
+                </FieldShell>
+                <FieldShell label="Engine">
+                  <StudioSelect value={carDetails.engine} onChange={(event) => onCarDetailsChange('engine', event.target.value)}>
+                    <option value="">Select</option>
+                    {engineOptions.map((option) => <option key={option}>{option}</option>)}
+                  </StudioSelect>
+                </FieldShell>
+                <FieldShell label="Tune stage">
+                  <StudioSelect value={carDetails.tuneStage} onChange={(event) => onCarDetailsChange('tuneStage', event.target.value)}>
+                    <option value="">Select</option>
+                    {tuneOptions.map((option) => <option key={option}>{option}</option>)}
+                  </StudioSelect>
+                </FieldShell>
+              </div>
+            </div>
+          </SurfaceSection>
+
+          <SurfaceSection title="Current file" subtitle="Latest parser context and comparison status.">
+            <div className="space-y-3">
+              <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-3">
+                <p className="text-[12px] font-medium text-[var(--text-primary)]">{analysis?.filename || 'No session loaded'}</p>
+                <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+                  {analysis ? `${analysis.row_count} rows · ${analysis.logFormat} format` : 'Upload a BM3 or MHD CSV to generate diagnostics.'}
+                </p>
+              </div>
+              <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-3">
+                <p className="font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">Compare pull</p>
+                <p className="mt-2 text-[11px] text-[var(--text-secondary)]">
+                  {compareAnalysis ? `${compareAnalysis.filename} is overlaid on the main session charts.` : 'Upload a second CSV to overlay AFR and boost trends.'}
+                </p>
+              </div>
+            </div>
+          </SurfaceSection>
+        </div>
+
+        {!analysis ? (
+          <EmptyState
+            icon={Activity}
+            title="Analyzer is ready"
+            body="Upload a CSV to restore the original analysis workflow: health scoring, diagnostics, chart data, and garage archiving."
+            actionLabel="Upload a log"
+            onAction={onUpload}
+          />
+        ) : (
+          <>
+            <AnalyzerSummary analysis={analysis} />
+
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+              <SurfaceSection title="AFR and boost trace" subtitle="The main comparison overlay uses the same parser output saved to storage.">
+                <div className="h-[300px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={compareData}>
+                      <CartesianGrid stroke="var(--border)" vertical={false} />
+                      <XAxis dataKey="time" tick={{ fontSize: 10, fill: 'var(--text-muted)', fontFamily: 'DM Mono' }} />
+                      <YAxis yAxisId="afr" tick={{ fontSize: 10, fill: 'var(--text-muted)', fontFamily: 'DM Mono' }} width={38} />
+                      <YAxis yAxisId="boost" orientation="right" tick={{ fontSize: 10, fill: 'var(--text-muted)', fontFamily: 'DM Mono' }} width={38} />
+                      <Tooltip content={<TelemetryTooltip />} />
+                      <Line yAxisId="afr" type="monotone" dataKey="afrActual" name="AFR" stroke="var(--text-primary)" dot={false} strokeWidth={1.6} />
+                      <Line yAxisId="afr" type="monotone" dataKey="afrActual_b" name="AFR compare" stroke="#9a958e" dot={false} strokeWidth={1.2} strokeDasharray="4 3" />
+                      <Line yAxisId="boost" type="monotone" dataKey="boost" name="Boost" stroke="#c97f22" dot={false} strokeWidth={1.6} />
+                      <Line yAxisId="boost" type="monotone" dataKey="boost_b" name="Boost compare" stroke="#e8c97a" dot={false} strokeWidth={1.2} strokeDasharray="4 3" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </SurfaceSection>
+
+              <SurfaceSection title="HPFP trace" subtitle="Actual versus target pressure from the active session.">
+                <div className="h-[300px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={analysis.chartData}>
+                      <CartesianGrid stroke="var(--border)" vertical={false} />
+                      <XAxis dataKey="time" tick={{ fontSize: 10, fill: 'var(--text-muted)', fontFamily: 'DM Mono' }} />
+                      <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)', fontFamily: 'DM Mono' }} width={42} />
+                      <Tooltip content={<TelemetryTooltip />} />
+                      <Area type="monotone" dataKey="hpfpTarget" name="Target" stroke="#c6a75a" fill="rgba(232,201,122,0.16)" strokeWidth={1.3} />
+                      <Area type="monotone" dataKey="hpfpActual" name="Actual" stroke="var(--text-primary)" fill="var(--selection)" strokeWidth={1.5} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </SurfaceSection>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
+              <SurfaceSection title="Diagnostics" subtitle="Generated from the same analysis rules used by the original app.">
+                <div className="space-y-3">
+                  {diagnostics.length ? diagnostics.map((item) => (
+                    <div key={item.id} className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="text-[12px] font-medium text-[var(--text-primary)]">{item.title}</h3>
+                        <StatusBadge status={item.severity} />
+                      </div>
+                      <p className="mt-2 text-[11px] leading-[1.6] text-[var(--text-secondary)]">{item.evidence}</p>
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        <div>
+                          <p className="font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">Likely causes</p>
+                          <ul className="mt-2 space-y-1 text-[11px] text-[var(--text-secondary)]">
+                            {item.likelyCauses.map((cause) => <li key={cause}>• {cause}</li>)}
+                          </ul>
+                        </div>
+                        <div>
+                          <p className="font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">Recommended checks</p>
+                          <ul className="mt-2 space-y-1 text-[11px] text-[var(--text-secondary)]">
+                            {item.recommendedChecks.map((check) => <li key={check}>• {check}</li>)}
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+                  )) : (
+                    <p className="text-[11px] text-[var(--text-secondary)]">No diagnostics match the current search or filter state.</p>
+                  )}
+                </div>
+              </SurfaceSection>
+
+              <div className="space-y-4">
+                <SurfaceSection title="Key points" subtitle="Quick interpretation notes generated from the parser output.">
+                  <div className="space-y-2">
+                    {keyPoints.length ? keyPoints.map((point) => (
+                      <div key={point} className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-3 text-[11px] leading-[1.6] text-[var(--text-secondary)]">
+                        {point}
+                      </div>
+                    )) : (
+                      <p className="text-[11px] text-[var(--text-secondary)]">No key points match the current search.</p>
+                    )}
+                  </div>
+                </SurfaceSection>
+
+                <SurfaceSection title="Knock scatter" subtitle="Correction points derived from timing columns.">
+                  <div className="h-[220px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ScatterChart>
+                        <CartesianGrid stroke="var(--border)" vertical={false} />
+                        <XAxis type="number" dataKey="rpm" tick={{ fontSize: 10, fill: 'var(--text-muted)', fontFamily: 'DM Mono' }} />
+                        <YAxis type="number" dataKey="pull" tick={{ fontSize: 10, fill: 'var(--text-muted)', fontFamily: 'DM Mono' }} />
+                        <Tooltip cursor={{ strokeDasharray: '4 4' }} />
+                        <Scatter data={analysis.knockScatter} fill="var(--text-primary)" />
+                      </ScatterChart>
+                    </ResponsiveContainer>
+                  </div>
+                </SurfaceSection>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+function ViewerTooltip({ active, payload }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 shadow-[0_12px_24px_rgba(0,0,0,0.08)]">
+      <div className="space-y-1">
+        {payload.map((entry) => {
+          const channel = entry.dataKey.replace(/_norm$/, '');
+          const rawValue = entry.payload?.[`${channel}_raw`];
+          return (
+            <div key={channel} className="flex items-center justify-between gap-3 text-[11px]">
+              <span className="text-[var(--text-secondary)]">{channel}</span>
+              <span className="font-mono text-[var(--text-primary)]">{rawValue ?? '—'}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const CHANNEL_PRESETS = [
+  { label: 'HPFP',    keys: ['hpfp', 'hp fuel', 'fuel press', 'kraftstoff', 'fuelpress', 'hd_druck', 'high press'] },
+  { label: 'Timing',  keys: ['timing', 'ignition', 'zündw', 'ign corr', 'knock', 'klopf', 'advance', 'retard'] },
+  { label: 'Boost',   keys: ['boost', 'map', 'manifold', 'ladedruck', 'turbo', 'charge press', 'inlet press'] },
+  { label: 'AFR',     keys: ['afr', 'lambda', 'o2', 'fuel trim', 'stft', 'ltft', 'sauerstoff', 'mixture'] },
+  { label: 'Thermals',keys: ['temp', 'iat', 'ect', 'coolant', 'oil temp', 'ansaug', 'intake air', 'wasser', 'öltemp'] },
+  { label: 'RPM',     keys: ['rpm', 'drehzahl', 'engine speed', 'rev'] },
+];
+
+function ViewerWorkspace({ viewerData, selectedChannels, onToggleChannel, onSetChannels, onUpload, searchQuery, filterActive, lineWidth }) {
+  const deferredSearch = useDeferredValue(searchQuery);
+  const filteredChannels = useMemo(() => {
+    if (!viewerData) return [];
+    return viewerData.numericChannels.filter((channel) => {
+      if (filterActive && !selectedChannels.has(channel)) return false;
+      if (!deferredSearch) return true;
+      return channel.toLowerCase().includes(deferredSearch.toLowerCase());
+    });
+  }, [viewerData, selectedChannels, filterActive, deferredSearch]);
+
+  const chartData = useMemo(() => {
+    if (!viewerData) return [];
+    return viewerData.rows.map((row, index) => {
+      const point = {
+        _t: viewerData.timeCol ? parseFloat(row[viewerData.timeCol]) || index : index,
+      };
+      selectedChannels.forEach((channel) => {
+        const value = parseFloat(row[channel]);
+        const stat = viewerData.stats[channel];
+        if (Number.isNaN(value) || !stat) return;
+        const span = stat.normMax - stat.normMin || 1;
+        point[`${channel}_norm`] = ((value - stat.normMin) / span) * 100;
+        point[`${channel}_raw`] = roundTo(value, 2);
+      });
+      return point;
+    });
+  }, [viewerData, selectedChannels]);
+
+  return (
+    <motion.div variants={itemVariants} className="flex-1 overflow-auto bg-[var(--bg-page)] px-6 py-[22px]">
+      {!viewerData ? (
+        <EmptyState
+          icon={MonitorPlay}
+          title="Viewer is ready"
+          body="Upload any CSV to inspect channels, normalize series automatically, and reopen archived garage logs without leaving the new shell."
+          actionLabel="Upload a CSV"
+          onAction={onUpload}
+        />
+      ) : (
+        <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
+          <SurfaceSection
+            title="Channels"
+            subtitle={`${viewerData.filename.length > 32 ? '…' + viewerData.filename.slice(-29) : viewerData.filename} · ${viewerData.numericChannels.length} numeric channels`}
+            action={
+              <button type="button" onClick={onUpload} className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-2 text-[11px] text-[var(--text-primary)]">
+                Replace
+              </button>
+            }
+          >
+            {/* Presets */}
+            <div className="mb-3 flex flex-wrap gap-1.5">
+              {CHANNEL_PRESETS.map((preset) => {
+                const matches = viewerData.numericChannels.filter(ch =>
+                  preset.keys.some(k => ch.toLowerCase().includes(k))
+                );
+                if (!matches.length) return null;
+                const active = matches.every(ch => selectedChannels.has(ch));
+                return (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => {
+                      if (active) {
+                        const next = new Set(selectedChannels);
+                        matches.forEach(ch => next.delete(ch));
+                        onSetChannels(next);
+                      } else {
+                        const next = new Set(selectedChannels);
+                        matches.forEach(ch => next.add(ch));
+                        onSetChannels(next);
+                      }
+                    }}
+                    className={`rounded-[6px] border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition-colors ${
+                      active
+                        ? 'border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-surface)]'
+                        : 'border-[var(--border)] bg-[var(--bg-muted)] text-[var(--text-secondary)] hover:border-[var(--text-primary)]'
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+              {selectedChannels.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onSetChannels(new Set())}
+                  className="rounded-[6px] border border-[var(--border)] bg-[var(--bg-muted)] px-2 py-0.5 text-[10px] text-[var(--text-muted)] hover:text-[var(--danger-text)] transition-colors"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+            <div className="max-h-[620px] space-y-2 overflow-auto pr-1">
+              {filteredChannels.map((channel) => {
+                const checked = selectedChannels.has(channel);
+                return (
+                  <button
+                    key={channel}
+                    type="button"
+                    onClick={() => onToggleChannel(channel)}
+                    className={`flex w-full items-center justify-between gap-3 rounded-[8px] border px-3 py-2 text-left transition-colors ${
+                      checked
+                        ? 'border-[var(--text-primary)] bg-[var(--bg-page)] text-[var(--text-primary)]'
+                        : 'border-[var(--border)] bg-[var(--bg-muted)] text-[var(--text-secondary)]'
+                    }`}
+                  >
+                    <span className="truncate text-[11px]">{channel}</span>
+                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: viewerData.colors[channel] }} />
+                  </button>
+                );
+              })}
+            </div>
+          </SurfaceSection>
+
+          <div className="space-y-4">
+            <SurfaceSection title="Telemetry canvas" subtitle="Normalized chart with raw values preserved in the tooltip.">
+              <div className="h-[420px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData}>
+                    <CartesianGrid stroke="var(--border)" vertical={false} />
+                    <XAxis dataKey="_t" tick={{ fontSize: 10, fill: 'var(--text-muted)', fontFamily: 'DM Mono' }} />
+                    <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)', fontFamily: 'DM Mono' }} width={32} />
+                    <Tooltip content={<ViewerTooltip />} />
+                    {Array.from(selectedChannels).map((channel) => (
+                      <Line
+                        key={channel}
+                        type="monotone"
+                        dataKey={`${channel}_norm`}
+                        stroke={viewerData.colors[channel]}
+                        dot={false}
+                        strokeWidth={lineWidth}
+                      />
+                    ))}
+                    {chartData.length > 40 ? <Brush dataKey="_t" height={20} stroke="#9a958e" travellerWidth={8} /> : null}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </SurfaceSection>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              <StatCard label="Rows shown" value={String(viewerData.rows.length)} detail="Downsampling is applied from settings." />
+              <StatCard label="Selected" value={String(selectedChannels.size)} detail="Series are normalized onto one scale." />
+              <StatCard label="Time axis" value={viewerData.timeCol || 'Index'} detail="Detected automatically from the CSV header." />
+            </div>
           </div>
         </div>
       )}
+    </motion.div>
+  );
+}
 
-      <PageHeader
-        eyebrow="Control Center"
-        title="B58 Gen1 Overview"
-        description="Blend planning, log review, and tune health in one place."
-        meta={
-          <>
-            <MetricPill icon={CalendarClock} label="Last Log" value={mostRecentLog ? formatTimeAgo(mostRecentLog.date) : 'No data'} />
-            <MetricPill icon={ShieldCheck} label="Health Score" value={averageHealthScore ?? '—'} />
-            <MetricPill icon={Droplet} label="Target Blend" value={activeBlend ? `E${activeBlend.resultingBlend}` : 'Unset'} />
-            <MetricPill icon={FileText} label="Recent Logs" value={recentLogs.length} />
-          </>
-        }
-      />
+function CalculatorWorkspace({ snapshot, onSnapshotRefresh, searchQuery }) {
+  const [mode, setMode] = useState('blend');
+  const [form, setForm] = useState({
+    currentFuel: snapshot.activeBlend?.currentFuel ?? 5,
+    currentE: snapshot.activeBlend?.currentE ?? 10,
+    targetE: snapshot.activeBlend?.resultingBlend ?? 40,
+    tankSize: 13.7,
+    pumpEthanol: snapshot.activeBlend?.pumpEthanol ?? 10,
+    pumpOctane: snapshot.activeBlend?.pumpOctane ?? 93,
+    precisionMode: false,
+    addFuel: 3,
+    calibrationReadings: '72, 74, 76',
+    e85Price: 3.19,
+    pumpPrice: 4.29,
+    tankCount: 3,
+    profileName: '',
+    stationName: '',
+  });
+  const [blendResult, setBlendResult] = useState(snapshot.activeBlend);
+  const [refuelResult, setRefuelResult] = useState(null);
+  const [calibratedPumpE, setCalibratedPumpE] = useState(null);
+  const [costResult, setCostResult] = useState(null);
+  const [tankPlan, setTankPlan] = useState([]);
+  const [error, setError] = useState(null);
+  const units = snapshot.settings.units;
+  const filteredSearch = searchQuery.trim().toLowerCase();
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-        <div className="xl:col-span-5">
-          <SurfaceCard strong className="h-full">
-            <SectionTitle
-              icon={Zap}
-              title="Quick Start"
-              subtitle="Drop in a CSV, run instant health analysis, or jump straight into fuel planning."
-            />
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <ActionTile
-                to="/analyzer"
-                icon={Upload}
-                title="Upload Logs"
-                description="Drop in a BM3 or MHD CSV, run instant health analysis, and save the result to your garage."
-                meta="Analyzer workflow"
-                emphasized
-              />
-              <ActionTile
-                to="/calculator"
-                icon={Droplet}
-                title="Calculate Blend"
-                description="Set your current tank state and get precise E85 and pump instructions."
-                meta="Fuel workflow"
-              />
-            </div>
-          </SurfaceCard>
+  const filteredProfiles = useMemo(() => Object.entries(snapshot.profiles).filter(([name]) => (!filteredSearch ? true : name.toLowerCase().includes(filteredSearch))), [snapshot.profiles, filteredSearch]);
+  const filteredStations = useMemo(() => Object.entries(snapshot.stationPresets).filter(([name]) => (!filteredSearch ? true : name.toLowerCase().includes(filteredSearch))), [snapshot.stationPresets, filteredSearch]);
+
+  const setField = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+
+  const handleBlend = () => {
+    setError(null);
+    try {
+      const result = calculateBlend({
+        current_gallons: form.currentFuel,
+        current_ethanol_percent: form.currentE,
+        target_ethanol_percent: form.targetE,
+        tank_size: form.tankSize,
+        pump_ethanol_percent: form.pumpEthanol,
+        precision_mode: form.precisionMode,
+      });
+      const octane = calculateResultingOctane({
+        e85Gallons: result.gallons_of_e85_to_add,
+        pumpGallons: result.gallons_of_93_to_add,
+        pumpOctane: form.pumpOctane,
+      });
+      const payload = {
+        ...result,
+        resultingBlend: result.resulting_percent,
+        resultingOctane: octane,
+        pumpEthanol: form.pumpEthanol,
+        pumpOctane: form.pumpOctane,
+        currentFuel: form.currentFuel,
+        currentE: form.currentE,
+        targetE: form.targetE,
+        tankSize: form.tankSize,
+        e85Gallons: result.gallons_of_e85_to_add,
+        pumpGallons: result.gallons_of_93_to_add,
+      };
+      saveActiveBlend(payload);
+      setBlendResult(payload);
+      onSnapshotRefresh();
+    } catch (caughtError) {
+      setError(caughtError.message);
+    }
+  };
+
+  const handleRefuel = () => {
+    setRefuelResult(reverseCalculateBlend({
+      currentE: form.currentE,
+      currentGallons: form.currentFuel,
+      addGallons: form.addFuel,
+      pumpEthanol: form.pumpEthanol,
+    }));
+  };
+
+  const handleCalibration = () => {
+    const readings = form.calibrationReadings.split(/[\s,]+/).filter(Boolean);
+    setCalibratedPumpE(calibratePumpEthanol(readings));
+  };
+
+  const handleCostPlan = () => {
+    try {
+      setCostResult(estimateBlendFillCost({
+        currentGallons: form.currentFuel,
+        currentE: form.currentE,
+        targetE: form.targetE,
+        tankSize: form.tankSize,
+        pumpEthanol: calibratedPumpE ?? form.pumpEthanol,
+        e85Price: form.e85Price,
+        pumpPrice: form.pumpPrice,
+      }));
+      setTankPlan(planEthanolOverTanks({
+        tanks: form.tankCount,
+        startGallons: form.currentFuel,
+        startE: form.currentE,
+        tankSize: form.tankSize,
+        targetE: form.targetE,
+        pumpEthanol: calibratedPumpE ?? form.pumpEthanol,
+      }));
+    } catch (caughtError) {
+      setError(caughtError.message);
+    }
+  };
+
+  const saveProfile = () => {
+    if (!form.profileName.trim()) return;
+    saveBlendProfile(form.profileName.trim(), {
+      currentFuel: form.currentFuel,
+      currentE: form.currentE,
+      targetE: form.targetE,
+      tankSize: form.tankSize,
+      pumpEthanol: form.pumpEthanol,
+      pumpOctane: form.pumpOctane,
+    });
+    setField('profileName', '');
+    onSnapshotRefresh();
+  };
+
+  const saveStation = () => {
+    if (!form.stationName.trim()) return;
+    saveStationPreset(form.stationName.trim(), {
+      e85Price: form.e85Price,
+      pumpPrice: form.pumpPrice,
+      pumpEthanol: calibratedPumpE ?? form.pumpEthanol,
+    });
+    setField('stationName', '');
+    onSnapshotRefresh();
+  };
+
+  return (
+    <motion.div variants={itemVariants} className="flex-1 overflow-auto bg-[var(--bg-page)] px-6 py-[22px]">
+      <div className="space-y-4">
+        <div className="flex flex-wrap gap-2">
+          {[
+            ['blend', 'Blend'],
+            ['refuel', 'Refuel'],
+            ['planner', 'Planner'],
+          ].map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setMode(id)}
+              className={`rounded-[8px] border px-3 py-2 text-[12px] ${
+                mode === id
+                  ? 'border-[var(--text-primary)] bg-[var(--bg-surface)] text-[var(--text-primary)]'
+                  : 'border-[var(--border)] bg-[var(--bg-muted)] text-[var(--text-secondary)]'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
-        <div className="xl:col-span-3">
-          <SurfaceCard strong className="h-full">
-            <SectionTitle
-              icon={Heart}
-              title="Tune Health Score"
-              subtitle="Latest confidence snapshot from your most recent analyzed pull."
-            />
-            <div className="mt-4">
-              {/* Ring + label row */}
-              <div className="flex items-center gap-4">
-                <div className="relative h-[96px] w-[96px] shrink-0">
-                  <HealthRing score={mostRecentLog?.healthScore ?? null} size={96} />
-                  <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-[2rem] font-semibold leading-none tracking-tight" style={{ color: scoreColor(mostRecentLog?.healthScore ?? null) }}>
-                      {mostRecentLog?.healthScore ?? '—'}
-                    </span>
-                    <span className="mt-0.5 text-[10px] app-muted">/ 100</span>
-                  </div>
-                </div>
-                <div className="min-w-0">
-                  <p className="text-base font-semibold app-heading">{scoreLabel(mostRecentLog?.healthScore ?? null)}</p>
-                  <p className="mt-0.5 text-[12px] leading-snug app-muted">
-                    {mostRecentLog ? formatDate(mostRecentLog.date) : 'Upload a log to compute health.'}
-                  </p>
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <SurfaceSection title="Fuel math" subtitle="The original blend utilities are now routed through the redesigned shell.">
+            <div className="grid gap-3 md:grid-cols-2">
+              <FieldShell label={`Current fuel (${units === 'Metric' ? 'L' : 'gal'})`}>
+                <StudioInput
+                  type="number"
+                  value={toDisplayVolume(form.currentFuel, units)}
+                  onChange={(event) => setField('currentFuel', fromDisplayVolume(event.target.value, units))}
+                />
+              </FieldShell>
+              <FieldShell label="Current ethanol (%)">
+                <StudioInput type="number" value={form.currentE} onChange={(event) => setField('currentE', Number(event.target.value))} />
+              </FieldShell>
+              <FieldShell label="Target ethanol (%)">
+                <StudioInput type="number" value={form.targetE} onChange={(event) => setField('targetE', Number(event.target.value))} />
+              </FieldShell>
+              <FieldShell label={`Tank size (${units === 'Metric' ? 'L' : 'gal'})`}>
+                <StudioInput
+                  type="number"
+                  value={toDisplayVolume(form.tankSize, units)}
+                  onChange={(event) => setField('tankSize', fromDisplayVolume(event.target.value, units))}
+                />
+              </FieldShell>
+              <FieldShell label="Pump ethanol (%)">
+                <StudioInput type="number" value={form.pumpEthanol} onChange={(event) => setField('pumpEthanol', Number(event.target.value))} />
+              </FieldShell>
+              <FieldShell label="Pump octane">
+                <StudioInput type="number" value={form.pumpOctane} onChange={(event) => setField('pumpOctane', Number(event.target.value))} />
+              </FieldShell>
+            </div>
+
+            {mode === 'blend' ? (
+              <div className="mt-4 space-y-4">
+                <label className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)]">
+                  <input type="checkbox" checked={form.precisionMode} onChange={(event) => setField('precisionMode', event.target.checked)} />
+                  Precision mode with staged fill steps
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={handleBlend} className="rounded-[8px] bg-[var(--text-primary)] px-4 py-2 text-[12px] font-medium text-[var(--bg-page)]">
+                    Run blend
+                  </button>
+                  <button type="button" onClick={saveProfile} className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-2 text-[12px] text-[var(--text-primary)]">
+                    Save profile
+                  </button>
+                  <StudioInput
+                    placeholder="Profile name"
+                    value={form.profileName}
+                    onChange={(event) => setField('profileName', event.target.value)}
+                    className="mt-0 max-w-[180px]"
+                  />
                 </div>
               </div>
+            ) : null}
 
-              {/* Metrics 2-col grid */}
-              {healthBreakdown.length > 0 && (
-                <div className="mt-4 grid grid-cols-2 gap-2">
-                  {healthBreakdown.map((item) => (
-                    <div key={item.label} className="rounded border border-[var(--app-border)] bg-[var(--app-card-inset)] px-3 py-2.5">
-                      <p className="text-[10.5px] font-medium app-muted">{item.label}</p>
-                      <p className="mt-0.5 text-sm font-semibold app-heading">{item.value}</p>
+            {mode === 'refuel' ? (
+              <div className="mt-4 space-y-4">
+                <FieldShell label={`Fuel to add (${units === 'Metric' ? 'L' : 'gal'})`}>
+                  <StudioInput
+                    type="number"
+                    value={toDisplayVolume(form.addFuel, units)}
+                    onChange={(event) => setField('addFuel', fromDisplayVolume(event.target.value, units))}
+                  />
+                </FieldShell>
+                <button type="button" onClick={handleRefuel} className="rounded-[8px] bg-[var(--text-primary)] px-4 py-2 text-[12px] font-medium text-[var(--bg-page)]">
+                  Calculate resulting blend
+                </button>
+              </div>
+            ) : null}
+
+            {mode === 'planner' ? (
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <div className="space-y-3">
+                  <FieldShell label="Tester readings">
+                    <StudioInput value={form.calibrationReadings} onChange={(event) => setField('calibrationReadings', event.target.value)} />
+                  </FieldShell>
+                  <FieldShell label="E85 price">
+                    <StudioInput type="number" value={form.e85Price} onChange={(event) => setField('e85Price', Number(event.target.value))} />
+                  </FieldShell>
+                  <FieldShell label="Pump price">
+                    <StudioInput type="number" value={form.pumpPrice} onChange={(event) => setField('pumpPrice', Number(event.target.value))} />
+                  </FieldShell>
+                </div>
+                <div className="space-y-3">
+                  <FieldShell label="Tank count">
+                    <StudioInput type="number" value={form.tankCount} onChange={(event) => setField('tankCount', Number(event.target.value))} />
+                  </FieldShell>
+                  <FieldShell label="Station name">
+                    <StudioInput value={form.stationName} onChange={(event) => setField('stationName', event.target.value)} />
+                  </FieldShell>
+                  <div className="flex flex-wrap gap-2 pt-5">
+                    <button type="button" onClick={handleCalibration} className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-2 text-[12px] text-[var(--text-primary)]">
+                      Calibrate
+                    </button>
+                    <button type="button" onClick={handleCostPlan} className="rounded-[8px] bg-[var(--text-primary)] px-4 py-2 text-[12px] font-medium text-[var(--bg-page)]">
+                      Build plan
+                    </button>
+                    <button type="button" onClick={saveStation} className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-2 text-[12px] text-[var(--text-primary)]">
+                      Save station
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {error ? <p className="mt-4 text-[11px] text-[var(--danger-text)]">{error}</p> : null}
+          </SurfaceSection>
+
+          <div className="space-y-4">
+            <SurfaceSection title="Results" subtitle="Live values saved back into local storage.">
+              {mode === 'blend' && !blendResult ? (
+                <p className="text-[11px] text-[var(--text-muted)]">
+                  Fill in the blend fields and tap <span className="font-medium text-[var(--text-primary)]">Run blend</span> to see results here.
+                </p>
+              ) : null}
+
+              {mode === 'blend' && blendResult ? (
+                <div className="space-y-3 text-[12px] text-[var(--text-secondary)]">
+                  <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-3">
+                    <p className="font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">Primary fill</p>
+                    <p className="mt-2 text-[14px] font-medium text-[var(--text-primary)]">
+                      {formatVolume(blendResult.e85Gallons, units)} E85 / {formatVolume(blendResult.pumpGallons, units)} pump
+                    </p>
+                    <p className="mt-1">Resulting blend E{blendResult.resultingBlend} at {blendResult.resultingOctane || '—'} AKI.</p>
+                  </div>
+                  {blendResult.fill_steps?.length ? (
+                    <div className="space-y-2">
+                      {blendResult.fill_steps.map((step) => (
+                        <div key={step.step} className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-3">
+                          <p className="font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">Step {step.step}</p>
+                          <p className="mt-1 text-[11px] text-[var(--text-secondary)]">{step.note}</p>
+                        </div>
+                      ))}
                     </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {mode === 'refuel' ? (
+                <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-3 text-[12px] text-[var(--text-secondary)]">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">Projected blend</p>
+                  <p className="mt-2 text-[20px] font-light text-[var(--text-primary)]">{refuelResult === null ? '—' : `E${refuelResult}`}</p>
+                </div>
+              ) : null}
+
+              {mode === 'planner' ? (
+                <div className="space-y-3 text-[12px] text-[var(--text-secondary)]">
+                  <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-3">
+                    <p className="font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">Calibrated pump ethanol</p>
+                    <p className="mt-2 text-[20px] font-light text-[var(--text-primary)]">{calibratedPumpE === null ? '—' : `${calibratedPumpE}%`}</p>
+                  </div>
+                  {costResult ? (
+                    <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-3">
+                      <p className="font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">Estimated fill cost</p>
+                      <p className="mt-2 text-[20px] font-light text-[var(--text-primary)]">${costResult.totalCost}</p>
+                      <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+                        E85 ${costResult.e85Cost} / Pump ${costResult.pumpCost}
+                      </p>
+                    </div>
+                  ) : null}
+                  {tankPlan.length ? (
+                    <div className="space-y-2">
+                      {tankPlan.map((item) => (
+                        <div key={item.tank} className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-3">
+                          <p className="font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">Tank {item.tank}</p>
+                          <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+                            {formatVolume(item.e85Gallons, units)} E85 and {formatVolume(item.pumpGallons, units)} pump to land at E{item.resultingE}.
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </SurfaceSection>
+
+            <SurfaceSection title="Saved items" subtitle="Blend profiles and station presets stored from this workspace.">
+              <div className="space-y-3">
+                <div>
+                  <p className="font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">Profiles</p>
+                  <div className="mt-2 space-y-2">
+                    {filteredProfiles.length ? filteredProfiles.map(([name, profile]) => (
+                      <div key={name} className="flex items-center justify-between gap-3 rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-2">
+                        <button type="button" onClick={() => setForm((current) => ({ ...current, ...profile }))} className="text-left">
+                          <p className="text-[12px] font-medium text-[var(--text-primary)]">{name}</p>
+                          <p className="text-[10px] text-[var(--text-secondary)]">Target E{profile.targetE}</p>
+                        </button>
+                        <button type="button" onClick={() => { deleteBlendProfile(name); onSnapshotRefresh(); }} className="text-[var(--danger-text)]">
+                          <Trash2 size={12} strokeWidth={1.8} />
+                        </button>
+                      </div>
+                    )) : <p className="text-[11px] text-[var(--text-secondary)]">No saved profiles match the current search.</p>}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">Stations</p>
+                  <div className="mt-2 space-y-2">
+                    {filteredStations.length ? filteredStations.map(([name, preset]) => (
+                      <div key={name} className="flex items-center justify-between gap-3 rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-2">
+                        <button
+                          type="button"
+                          onClick={() => setForm((current) => ({
+                            ...current,
+                            e85Price: preset.e85Price ?? current.e85Price,
+                            pumpPrice: preset.pumpPrice ?? current.pumpPrice,
+                            pumpEthanol: preset.pumpEthanol ?? current.pumpEthanol,
+                          }))}
+                          className="text-left"
+                        >
+                          <p className="text-[12px] font-medium text-[var(--text-primary)]">{name}</p>
+                          <p className="text-[10px] text-[var(--text-secondary)]">
+                            E85 ${preset.e85Price} / Pump ${preset.pumpPrice}
+                          </p>
+                        </button>
+                        <button type="button" onClick={() => { deleteStationPreset(name); onSnapshotRefresh(); }} className="text-[var(--danger-text)]">
+                          <Trash2 size={12} strokeWidth={1.8} />
+                        </button>
+                      </div>
+                    )) : <p className="text-[11px] text-[var(--text-secondary)]">No station presets saved yet.</p>}
+                  </div>
+                </div>
+              </div>
+            </SurfaceSection>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+const CAR_ENGINE_OPTIONS = ['B58 Gen1', 'B58 Gen2', 'S58', 'S55', 'N55', 'N54', 'N20/N26', 'B48', 'N63/S63', 'Other'];
+const CAR_TUNE_OPTIONS = ['Stock', 'Stage 1', 'Stage 2', 'Stage 2+', 'Custom E-tune', 'Full build'];
+const CAR_ETHANOL_OPTIONS = [0, 10, 20, 30, 40, 50, 85, 100];
+
+const EMPTY_CAR_FORM = { nickname: '', year: '', model: '', engine: '', tuneStage: '', ethanol: '', tuner: '', notes: '' };
+
+function GarageWorkspace({ snapshot, onSnapshotRefresh, onAnalyzeWithCar }) {
+  const [profiles, setProfiles] = useState(() => getCarProfiles());
+  const [activeCarId, setActiveCarId] = useState(() => getActiveCar());
+  const [editing, setEditing] = useState(null); // null | 'new' | id string
+  const [form, setForm] = useState(EMPTY_CAR_FORM);
+
+  const handleSetActive = (id) => {
+    const newId = activeCarId === id ? null : id;
+    setActiveCar(newId);
+    setActiveCarId(newId);
+  };
+
+  const refresh = () => setProfiles(getCarProfiles());
+
+  const openNew = () => { setForm(EMPTY_CAR_FORM); setEditing('new'); };
+  const openEdit = (p) => { setForm({ nickname: p.nickname||'', year: p.year||'', model: p.model||'', engine: p.engine||'', tuneStage: p.tuneStage||'', ethanol: p.ethanol??'', tuner: p.tuner||'', notes: p.notes||'' }); setEditing(p.id); };
+  const cancel = () => { setEditing(null); setForm(EMPTY_CAR_FORM); };
+
+  const save = () => {
+    if (!form.nickname.trim()) return;
+    if (editing === 'new') saveCarProfile(form);
+    else updateCarProfile(editing, form);
+    refresh();
+    cancel();
+  };
+
+  const remove = (id) => { deleteCarProfile(id); refresh(); };
+
+  const field = (key) => ({ value: form[key], onChange: (e) => setForm((f) => ({ ...f, [key]: e.target.value })) });
+
+  return (
+    <motion.div variants={itemVariants} className="flex-1 overflow-auto bg-[var(--bg-page)] px-6 py-[22px]">
+      <div className="space-y-4">
+        <SurfaceSection
+          title="My cars"
+          action={
+            <button type="button" onClick={openNew}
+              className="flex shrink-0 items-center gap-1 rounded-[7px] border border-[var(--border)] bg-[var(--bg-muted)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-page)] transition-colors">
+              <Plus size={11} strokeWidth={2} /><span>Add car</span>
+            </button>
+          }
+        >
+          {/* Add / Edit form */}
+          {editing !== null && (
+            <div className="mb-4 rounded-[10px] border border-[var(--border)] bg-[var(--bg-page)] p-4 space-y-3">
+              <p className="text-[12px] font-semibold text-[var(--text-primary)]">{editing === 'new' ? 'New car' : 'Edit car'}</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Nickname *</label>
+                  <input {...field('nickname')} placeholder="e.g. Daily M2" className="app-input w-full px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Year</label>
+                  <input {...field('year')} placeholder="e.g. 2019" className="app-input w-full px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Model</label>
+                  <input {...field('model')} placeholder="e.g. M2 Competition" className="app-input w-full px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Engine</label>
+                  <select {...field('engine')} className="app-input w-full px-3 py-2 text-sm">
+                    <option value="">Select</option>
+                    {CAR_ENGINE_OPTIONS.map((o) => <option key={o}>{o}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Tune stage</label>
+                  <select {...field('tuneStage')} className="app-input w-full px-3 py-2 text-sm">
+                    <option value="">Select</option>
+                    {CAR_TUNE_OPTIONS.map((o) => <option key={o}>{o}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Fuel blend</label>
+                  <select {...field('ethanol')} className="app-input w-full px-3 py-2 text-sm">
+                    <option value="">Select</option>
+                    {CAR_ETHANOL_OPTIONS.map((v) => <option key={v} value={v}>E{v}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Tuner</label>
+                  <input {...field('tuner')} placeholder="e.g. BM3, MHD, JB4" className="app-input w-full px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Notes</label>
+                  <input {...field('notes')} placeholder="Mods, dyno numbers, etc." className="app-input w-full px-3 py-2 text-sm" />
+                </div>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button type="button" onClick={save}
+                  className="rounded-[8px] bg-[var(--text-primary)] px-4 py-2 text-[12px] font-medium text-[var(--bg-surface)]">
+                  Save
+                </button>
+                <button type="button" onClick={cancel}
+                  className="rounded-[8px] border border-[var(--border)] px-4 py-2 text-[12px] text-[var(--text-secondary)]">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Car cards */}
+          {profiles.length === 0 && editing === null ? (
+            <p className="text-[12px] text-[var(--text-secondary)]">No cars added yet. Hit "Add car" to get started.</p>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {profiles.map((p) => {
+                const isActive = activeCarId === p.id;
+                const matchingLogs = (snapshot.garageLogs || []).filter((log) =>
+                  (!p.engine || log.engine === p.engine) &&
+                  (p.ethanol === '' || p.ethanol == null || String(log.ethanol) === String(p.ethanol)) &&
+                  (!p.tuneStage || log.tune === p.tuneStage)
+                );
+                const logCount = matchingLogs.length;
+                const lastHealth = matchingLogs.length > 0
+                  ? [...matchingLogs].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0].healthScore
+                  : null;
+                return (
+                  <div key={p.id} className={`rounded-[10px] border bg-[var(--bg-surface)] p-4 space-y-2 transition-all ${isActive ? 'border-[var(--text-primary)] ring-1 ring-[var(--text-primary)]' : 'border-[var(--border)]'}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-[13px] font-semibold text-[var(--text-primary)] leading-tight">{p.nickname}</p>
+                          {isActive && <span className="rounded-[4px] bg-[var(--text-primary)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--bg-surface)]">Active</span>}
+                        </div>
+                        {(p.year || p.model) && <p className="text-[11px] text-[var(--text-secondary)]">{[p.year, p.model].filter(Boolean).join(' ')}</p>}
+                      </div>
+                      <div className="flex gap-1 shrink-0">
+                        <button type="button" onClick={() => openEdit(p)} className="rounded p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]"><Pencil size={12} /></button>
+                        <button type="button" onClick={() => remove(p.id)} className="rounded p-1 text-[var(--text-muted)] hover:text-[var(--danger-text)]"><Trash2 size={12} /></button>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {p.engine && <span className="rounded-[5px] bg-[var(--bg-muted)] px-2 py-0.5 text-[10px] font-mono text-[var(--text-secondary)]">{p.engine}</span>}
+                      {p.tuneStage && <span className="rounded-[5px] bg-[var(--bg-muted)] px-2 py-0.5 text-[10px] font-mono text-[var(--text-secondary)]">{p.tuneStage}</span>}
+                      {p.ethanol !== '' && p.ethanol !== undefined && <span className="rounded-[5px] bg-[var(--bg-muted)] px-2 py-0.5 text-[10px] font-mono text-[var(--text-secondary)]">E{p.ethanol}</span>}
+                      {p.tuner && <span className="rounded-[5px] bg-[var(--bg-muted)] px-2 py-0.5 text-[10px] font-mono text-[var(--text-secondary)]">{p.tuner}</span>}
+                    </div>
+                    {p.notes && <p className="text-[11px] text-[var(--text-muted)] leading-snug">{p.notes}</p>}
+                    {/* Stats row */}
+                    <div className="flex items-center gap-3 pt-0.5">
+                      <span className="text-[10px] text-[var(--text-muted)]">
+                        <span className="font-semibold text-[var(--text-secondary)]">{logCount}</span> {logCount === 1 ? 'log' : 'logs'}
+                      </span>
+                      {lastHealth != null && (
+                        <span className="text-[10px] text-[var(--text-muted)]">
+                          Last health <span className="font-semibold text-[var(--text-secondary)]">{lastHealth}%</span>
+                        </span>
+                      )}
+                    </div>
+                    {/* Action buttons */}
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => handleSetActive(p.id)}
+                        className={`rounded-[7px] border px-3 py-1.5 text-[11px] font-medium transition-colors ${isActive ? 'border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-surface)]' : 'border-[var(--border)] bg-[var(--bg-muted)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+                      >
+                        {isActive ? 'Active' : 'Set active'}
+                      </button>
+                      {onAnalyzeWithCar && (
+                        <button
+                          type="button"
+                          onClick={() => onAnalyzeWithCar(p)}
+                          className="rounded-[7px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-1.5 text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+                        >
+                          Analyze Log
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </SurfaceSection>
+      </div>
+    </motion.div>
+  );
+}
+
+function ArchiveWorkspace({ snapshot, onSnapshotRefresh, searchQuery, filterActive, onOpenAnalysis, onOpenViewer, carProfiles = [] }) {
+  const importRef = useRef(null);
+  const [tagFilter, setTagFilter] = useState('all');
+  const [carFilter, setCarFilter] = useState(null);
+  const [importError, setImportError] = useState(null);
+  const deferredSearch = useDeferredValue(searchQuery);
+
+  const allTags = useMemo(() => {
+    const tags = new Set();
+    snapshot.garageLogs.forEach((log) => (log.tags || []).forEach((tag) => tags.add(tag)));
+    return [...tags].sort();
+  }, [snapshot.garageLogs]);
+
+  const filteredLogs = useMemo(() => snapshot.garageLogs.filter((log) => {
+    if (filterActive && log.status === 'Safe') return false;
+    const matchTag = tagFilter === 'all' || (log.tags || []).includes(tagFilter);
+    const matchSearch = !deferredSearch || `${log.filename} ${log.notes || ''} ${(log.tags || []).join(' ')}`.toLowerCase().includes(deferredSearch.toLowerCase());
+    if (!matchTag || !matchSearch) return false;
+    if (carFilter) {
+      const car = carProfiles.find((p) => p.id === carFilter);
+      if (car) {
+        const engineMatch = !car.engine || log.engine === car.engine;
+        const ethanolMatch = car.ethanol === '' || car.ethanol == null || String(log.ethanol) === String(car.ethanol);
+        const tuneMatch = !car.tuneStage || log.tune === car.tuneStage;
+        if (!engineMatch || !ethanolMatch || !tuneMatch) return false;
+      }
+    }
+    return true;
+  }), [snapshot.garageLogs, tagFilter, filterActive, deferredSearch, carFilter, carProfiles]);
+
+  const handleImport = async (file) => {
+    try {
+      setImportError(null);
+      const text = await file.text();
+      importGarageBackup(JSON.parse(text), 'merge');
+      onSnapshotRefresh();
+    } catch (caughtError) {
+      setImportError(caughtError instanceof Error ? caughtError.message : 'Could not import that backup file.');
+    }
+  };
+
+  return (
+    <motion.div variants={itemVariants} className="flex-1 overflow-auto bg-[var(--bg-page)] px-6 py-[22px]">
+      <div className="space-y-4">
+        <SurfaceSection
+          title="Garage archive"
+          subtitle="Long-term archive with reopen, tag, note, backup, and import flows restored."
+          action={(
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => downloadBlob(`ethos58-garage-summary-${Date.now()}.csv`, exportGarageSummaryCsv(), 'text/csv;charset=utf-8')}
+                className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-2 text-[11px] text-[var(--text-primary)]"
+              >
+                <FileSpreadsheet size={12} className="mr-1 inline-block" />
+                Export CSV
+              </button>
+              <button
+                type="button"
+                onClick={() => downloadBlob(`ethos58-garage-${Date.now()}.json`, JSON.stringify(exportGarageBackup(), null, 2), 'application/json')}
+                className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-2 text-[11px] text-[var(--text-primary)]"
+              >
+                <FileJson size={12} className="mr-1 inline-block" />
+                Backup JSON
+              </button>
+              <button
+                type="button"
+                onClick={() => importRef.current?.click()}
+                className="rounded-[8px] bg-[var(--text-primary)] px-3 py-2 text-[11px] font-medium text-[var(--bg-page)]"
+              >
+                <FileUp size={12} className="mr-1 inline-block" />
+                Import JSON
+              </button>
+              <input
+                ref={importRef}
+                type="file"
+                accept="application/json"
+                className="hidden"
+                onChange={(event) => {
+                  if (event.target.files?.[0]) handleImport(event.target.files[0]);
+                  event.target.value = '';
+                }}
+              />
+            </div>
+          )}
+        >
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
+            <div className="space-y-2">
+              <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-3 text-[11px] text-[var(--text-secondary)]">
+                Search is driven from the top bar. Use the filter button to limit the archive to non-safe logs.
+              </div>
+              {carProfiles.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {carProfiles.map((car) => (
+                    <button
+                      key={car.id}
+                      type="button"
+                      onClick={() => setCarFilter(carFilter === car.id ? null : car.id)}
+                      className={`rounded-[6px] border px-2.5 py-1 text-[11px] font-medium transition-colors ${carFilter === car.id ? 'border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-surface)]' : 'border-[var(--border)] bg-[var(--bg-muted)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+                    >
+                      {car.nickname}
+                    </button>
                   ))}
                 </div>
               )}
             </div>
-          </SurfaceCard>
-        </div>
+            <FieldShell label="Tag filter">
+              <StudioSelect value={tagFilter} onChange={(event) => setTagFilter(event.target.value)} className="mt-0">
+                <option value="all">All tags</option>
+                {allTags.map((tag) => <option key={tag} value={tag}>{tag}</option>)}
+              </StudioSelect>
+            </FieldShell>
+          </div>
+          {importError ? <p className="mt-3 text-[11px] text-[var(--danger-text)]">{importError}</p> : null}
+        </SurfaceSection>
 
-        <div className="xl:col-span-4">
-          <SurfaceCard strong className="h-full">
-            <SectionTitle
-              icon={Droplet}
-              title="Active Blend"
-              subtitle={activeBlend ? 'Pinned blend target and recent fill instruction set.' : 'No active blend is currently pinned.'}
-              action={activeBlend ? (
-                <button
-                  onClick={() => {
-                    if (!window.confirm('Clear the active blend from the dashboard?')) return;
-                    clearActiveBlend();
-                    setActiveBlend(null);
-                  }}
-                  className="inline-flex items-center gap-1 text-xs font-medium app-muted transition-colors hover:text-red-500"
-                >
-                  <Trash2 size={13} />
-                  Clear
-                </button>
-              ) : null}
-            />
-
-            {activeBlend ? (
-              <div className="mt-4 space-y-3">
-                <div className="grid grid-cols-[1fr_auto] items-end gap-4">
-                  <div>
-                    <p className="text-[2.6rem] font-semibold leading-none tracking-tight app-heading">E{activeBlend.resultingBlend}</p>
-                    <p className="mt-3 text-sm app-muted">Estimated octane {activeBlend.resultingOctane ?? '—'} · {formatDate(activeBlend.date)}</p>
+        <div className="space-y-3">
+          {filteredLogs.length ? filteredLogs.map((log) => (
+            <SurfaceSection
+              key={log.id}
+              title={log.filename}
+              subtitle={`${formatDateTime(log.createdAt)} · ${log.engine} · E${log.ethanol} · ${log.tune}`}
+              action={<StatusBadge status={log.status} />}
+            >
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
+                <div className="space-y-4">
+                  <div className="grid gap-3 md:grid-cols-4">
+                    <StatCard label="Health" value={String(log.healthScore ?? '—')} detail="Composite score from the analyzer." />
+                    <StatCard label="Rows" value={String(log.rowCount ?? '—')} detail="Original parsed row count." />
+                    <StatCard label="Timing" value={formatMetric(log.timingPull, ' deg', 1)} detail="Worst correction seen under load." />
+                    <StatCard label="AFR" value={formatMetric(log.afr, '', 2)} detail="Demand AFR or worst lean event." />
                   </div>
-                  <StatusPill status={activeBlend.warnings?.length ? 'Caution' : 'Safe'} />
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <FieldShell label="Tags">
+                      <StudioInput
+                        defaultValue={(log.tags || []).join(', ')}
+                        onBlur={(event) => {
+                          const tags = event.target.value.split(',').map((tag) => tag.trim()).filter(Boolean);
+                          updateGarageLogMeta(log.id, { tags });
+                          onSnapshotRefresh();
+                        }}
+                      />
+                    </FieldShell>
+                    <FieldShell label="Notes">
+                      <StudioTextarea
+                        rows={3}
+                        defaultValue={log.notes || ''}
+                        onBlur={(event) => {
+                          updateGarageLogMeta(log.id, { notes: event.target.value });
+                          onSnapshotRefresh();
+                        }}
+                      />
+                    </FieldShell>
+                  </div>
                 </div>
 
-                <div className="grid gap-2 md:grid-cols-2">
-                  <InsetCard>
-                    <p className="text-xs font-semibold uppercase tracking-wide app-muted">Target Blend</p>
-                    <p className="mt-2 text-2xl font-semibold tracking-tight app-heading">E{activeBlend.resultingBlend}</p>
-                  </InsetCard>
-                  <InsetCard>
-                    <p className="text-xs font-semibold uppercase tracking-wide app-muted">Peak Boost</p>
-                    <p className="mt-2 text-2xl font-semibold tracking-tight app-heading">{peakBoost !== null ? `${peakBoost.toFixed(1)} psi` : '—'}</p>
-                  </InsetCard>
-                </div>
-
-                <div className="grid gap-2 md:grid-cols-2">
-                  <InsetCard>
-                    <p className="text-xs font-semibold uppercase tracking-wide app-muted">E85 Mix</p>
-                    <p className="mt-2 text-2xl font-semibold tracking-tight app-heading">{activeBlend.e85Gallons} gal</p>
-                  </InsetCard>
-                  <InsetCard>
-                    <p className="text-xs font-semibold uppercase tracking-wide app-muted">Pump Mix</p>
-                    <p className="mt-2 text-2xl font-semibold tracking-tight app-heading">{activeBlend.pumpGallons} gal</p>
-                  </InsetCard>
+                <div className="space-y-2">
+                  <button type="button" onClick={() => onOpenAnalysis(log.id)} className="w-full rounded-[8px] bg-[var(--text-primary)] px-3 py-2 text-[12px] font-medium text-[var(--bg-page)]">
+                    Open analysis
+                  </button>
+                  <button type="button" onClick={() => onOpenViewer(log.id)} disabled={!log.hasCsv} className="w-full rounded-[8px] border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-[12px] text-[var(--text-primary)] disabled:opacity-40">
+                    Re-open CSV
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!window.confirm(`Delete ${log.filename} from the garage?`)) return;
+                      deleteGarageLog(log.id);
+                      onSnapshotRefresh();
+                    }}
+                    className="w-full rounded-[8px] border border-[rgba(224,81,58,0.3)] bg-[rgba(224,81,58,0.06)] px-3 py-2 text-[12px] text-[var(--danger-text)]"
+                  >
+                    Delete log
+                  </button>
                 </div>
               </div>
-            ) : (
-              <InsetCard className="mt-5 flex min-h-[160px] items-center justify-center text-center">
-                <div className="space-y-2">
-                  <p className="text-sm font-medium app-heading">No active blend</p>
-                  <p className="text-sm app-muted">Use the calculator to pin an ethanol target and recent fill instructions.</p>
-                </div>
-              </InsetCard>
-            )}
-
-            <Link
-              to="/calculator"
-              className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded border border-[var(--app-border)] bg-[var(--app-card-inset)] px-4 py-2.5 text-sm font-medium app-heading transition-all hover:border-[var(--app-border-strong)] hover:text-brand-500"
-            >
-              <Droplet size={15} />
-              {activeBlend ? 'Recalculate Blend' : 'Calculate Target'}
-            </Link>
-          </SurfaceCard>
+            </SurfaceSection>
+          )) : (
+            <EmptyState icon={FolderArchive} title="No garage logs match" body="Upload and analyze a log, or clear the current search and filter state to reveal archived entries." />
+          )}
         </div>
       </div>
+    </motion.div>
+  );
+}
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-        <SurfaceCard className="xl:col-span-5">
-          <SectionTitle
-            icon={FileText}
-            title="Recent Data Logs"
-            subtitle="Latest pulls from your garage-ready analysis history."
-            action={recentLogs.length > 0 ? (
+function SettingsWorkspace({ snapshot, onSettingChange, onSnapshotRefresh, searchQuery }) {
+  const deferredSearch = useDeferredValue(searchQuery);
+  const matches = (text) => !deferredSearch || text.toLowerCase().includes(deferredSearch.toLowerCase());
+
+  return (
+    <motion.div variants={itemVariants} className="flex-1 overflow-auto bg-[var(--bg-page)] px-6 py-[22px]">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(300px,0.8fr)]">
+        <div className="space-y-4">
+          {(matches('profile account name email') || !deferredSearch) ? (
+            <SurfaceSection title="Profile" subtitle="Basic account preferences stored locally.">
+              <div className="grid gap-3 md:grid-cols-2">
+                <FieldShell label="Display name">
+                  <StudioInput
+                    defaultValue={snapshot.settings.displayName || 'B58 Enthusiast'}
+                    onBlur={(event) => onSettingChange('displayName', event.target.value)}
+                  />
+                </FieldShell>
+                <FieldShell label="Email">
+                  <StudioInput
+                    type="email"
+                    defaultValue={snapshot.settings.email || 'user@example.com'}
+                    onBlur={(event) => onSettingChange('email', event.target.value)}
+                  />
+                </FieldShell>
+              </div>
+            </SurfaceSection>
+          ) : null}
+
+          {(matches('theme units preferences formatting') || !deferredSearch) ? (
+            <SurfaceSection title="Preferences" subtitle="Display and chart rendering preferences.">
+              <div className="grid gap-3 md:grid-cols-2">
+                <FieldShell label="Theme">
+                  <StudioSelect value={snapshot.settings.theme} onChange={(event) => onSettingChange('theme', event.target.value)}>
+                    <option value="system">System</option>
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                  </StudioSelect>
+                </FieldShell>
+                <FieldShell label="Units">
+                  <StudioSelect value={snapshot.settings.units} onChange={(event) => onSettingChange('units', event.target.value)}>
+                    <option value="US">US</option>
+                    <option value="Metric">Metric</option>
+                  </StudioSelect>
+                </FieldShell>
+              </div>
+            </SurfaceSection>
+          ) : null}
+
+          {(matches('viewer downsampling line thickness') || !deferredSearch) ? (
+            <SurfaceSection title="Viewer tuning" subtitle="Chart rendering preferences.">
+              <div className="grid gap-3 md:grid-cols-2">
+                <FieldShell label="Downsampling">
+                  <StudioSelect value={snapshot.settings.downsampling} onChange={(event) => onSettingChange('downsampling', event.target.value)}>
+                    {Object.keys(DOWNSAMPLING_MAP).map((option) => <option key={option}>{option}</option>)}
+                  </StudioSelect>
+                </FieldShell>
+                <FieldShell label="Line thickness">
+                  <StudioSelect value={snapshot.settings.lineThickness} onChange={(event) => onSettingChange('lineThickness', event.target.value)}>
+                    {Object.keys(LINE_WIDTH_MAP).map((option) => <option key={option}>{option}</option>)}
+                  </StudioSelect>
+                </FieldShell>
+              </div>
+            </SurfaceSection>
+          ) : null}
+        </div>
+
+        <div className="space-y-4">
+          <SurfaceSection title="Local storage" subtitle="Everything Ethos stores is kept on this device only.">
+            <div className="space-y-3">
+              <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-3">
+                <p className="font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">Recent logs</p>
+                <p className="mt-2 text-[22px] font-light text-[var(--text-primary)]">{snapshot.recentLogs.length}</p>
+              </div>
+              <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-3">
+                <p className="font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">Garage logs</p>
+                <p className="mt-2 text-[22px] font-light text-[var(--text-primary)]">{snapshot.garageLogs.length}</p>
+              </div>
+              <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-3">
+                <p className="font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">Fuel profiles</p>
+                <p className="mt-2 text-[22px] font-light text-[var(--text-primary)]">{Object.keys(snapshot.profiles).length}</p>
+              </div>
+            </div>
+          </SurfaceSection>
+
+          <SurfaceSection title="Data management" subtitle="Clear stored data from this device. This cannot be undone.">
+            <div className="space-y-2">
               <button
+                type="button"
                 onClick={() => {
-                  if (!window.confirm('Clear all recent data logs from the dashboard history?')) return;
-                  clearRecentLogs();
-                  setRecentLogs([]);
+                  if (!window.confirm('Clear all recent logs? This cannot be undone.')) return;
+                  localStorage.removeItem('ethos_recent_logs');
+                  localStorage.removeItem('ethos_log_results');
+                  onSnapshotRefresh();
                 }}
-                className="inline-flex items-center gap-1 text-xs font-medium app-muted transition-colors hover:text-red-500"
+                className="rounded-[8px] border border-[rgba(224,81,58,0.3)] bg-[rgba(224,81,58,0.06)] px-3 py-2 text-[12px] text-[var(--danger-text)] transition-colors hover:bg-[rgba(224,81,58,0.1)]"
               >
-                <Trash2 size={13} />
-                Clear
+                Clear recent logs
               </button>
-            ) : null}
-          />
-
-          <div className="mt-4 space-y-3">
-            {recentLogCards.map((log, index) => (
-              <InsetCard key={log.id} className="p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <StatusPill status={log.status} />
-                      <span className="text-xs app-muted">{formatTimeAgo(log.date)}</span>
-                    </div>
-                    <div>
-                      <p className="text-[1.1rem] font-semibold tracking-[-0.03em] app-heading">Pull #{recentLogs.length - index}</p>
-                      <p className="mt-1 text-sm app-muted">{log.filename}</p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-[1.35rem] font-semibold tracking-tight" style={{ color: scoreColor(log.healthScore) }}>
-                      {log.healthScore ?? '—'}
-                    </p>
-                    <p className="text-xs app-muted">Health</p>
-                  </div>
-                </div>
-
-                <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  <div className="rounded border border-[var(--app-border)] px-3 py-2">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide app-muted">Peak Boost</p>
-                    <p className="mt-1 text-base font-semibold app-heading">{log.peakBoost !== null ? `${log.peakBoost} psi` : '—'}</p>
-                  </div>
-                  <div className="rounded border border-[var(--app-border)] px-3 py-2">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide app-muted">Peak Timing</p>
-                    <p className="mt-1 text-base font-semibold app-heading">{log.peakTiming !== null ? `${Math.abs(log.peakTiming).toFixed(1)}°` : '—'}</p>
-                  </div>
-                </div>
-
-                <div className="mt-4 flex items-center justify-between">
-                  <button
-                    onClick={() => {
-                      const result = getLogResult(log.id);
-                      navigate('/analyzer', result?.analysis ? { state: { analysis: result.analysis } } : {});
-                    }}
-                    className="inline-flex items-center gap-2 text-sm font-medium app-heading transition-colors hover:text-brand-500"
-                  >
-                    View data log
-                    <ArrowRight size={14} />
-                  </button>
-                  <span className="text-xs font-medium app-muted">{formatShortDate(log.date)}</span>
-                </div>
-              </InsetCard>
-            ))}
-
-            {recentLogs.length === 0 && (
-              <InsetCard className="flex min-h-[220px] items-center justify-center border-dashed text-center">
-                <div className="space-y-2">
-                  <p className="text-sm font-medium app-heading">No recent data logs yet</p>
-                  <p className="text-sm app-muted">Analyze your first CSV to populate the control center.</p>
-                </div>
-              </InsetCard>
-            )}
-          </div>
-        </SurfaceCard>
-
-        <div className="grid gap-4 xl:col-span-7 xl:grid-cols-2">
-          <ChartCard
-            icon={TrendingUp}
-            title={boostSeries.label === 'RPM' ? 'Boost vs RPM' : 'Boost Trace'}
-            subtitle="Latest session telemetry, tuned for quick scanability."
-          >
-            {boostSeries.data.length >= 2 ? (
-              <>
-                <div className="surface-inset h-[240px] p-3">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={boostSeries.data} margin={{ top: 6, right: 8, left: -22, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="boostFill" x1="0" x2="0" y1="0" y2="1">
-                          <stop offset="0%" stopColor="#2dd4bf" stopOpacity={0.34} />
-                          <stop offset="100%" stopColor="#2dd4bf" stopOpacity={0.02} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid stroke="var(--app-chart-grid)" vertical={false} />
-                      <XAxis dataKey="axisValue" tick={{ fontSize: 11, fill: 'var(--app-chart-axis-muted)' }} tickLine={false} axisLine={false} />
-                      <YAxis tick={{ fontSize: 11, fill: 'var(--app-chart-axis-muted)' }} tickLine={false} axisLine={false} />
-                      <Tooltip content={<TrendTooltip />} />
-                      <Area type="monotone" dataKey="boost" name="Boost" stroke="#2dd4bf" strokeWidth={2.4} fill="url(#boostFill)" />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-                <p className="mt-3 text-xs app-muted">
-                  {boostSeries.label === 'RPM' ? 'Boost plotted directly against RPM from the latest analyzed pull.' : 'Boost trace from the latest analyzed pull.'}
-                </p>
-              </>
-            ) : (
-              <InsetCard className="flex min-h-[240px] items-center justify-center text-center">
-                <div className="space-y-2">
-                  <p className="text-sm font-medium app-heading">No boost curve available yet</p>
-                  <p className="text-sm app-muted">Analyze a pull with boost telemetry to populate this card.</p>
-                </div>
-              </InsetCard>
-            )}
-          </ChartCard>
-
-          <ChartCard
-            icon={Activity}
-            title="Timing vs RPM"
-            subtitle="Worst timing pull by RPM band from the latest log."
-          >
-            {timingSeries.length >= 2 ? (
-              <>
-                <div className="surface-inset h-[240px] p-3">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={timingSeries} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
-                      <CartesianGrid stroke="var(--app-chart-grid)" vertical={false} />
-                      <XAxis dataKey="rpm" tick={{ fontSize: 11, fill: 'var(--app-chart-axis-muted)' }} tickLine={false} axisLine={false} />
-                      <YAxis tick={{ fontSize: 11, fill: 'var(--app-chart-axis-muted)' }} tickLine={false} axisLine={false} />
-                      <Tooltip content={<TrendTooltip />} />
-                      <Line
-                        type="monotone"
-                        dataKey="pull"
-                        name="Timing Pull"
-                        stroke="#a855f7"
-                        strokeWidth={2.4}
-                        dot={{ r: 2.5, fill: '#a855f7' }}
-                        activeDot={{ r: 4 }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="mt-3 flex items-center justify-between text-xs app-muted">
-                  <span>Worst pull {worstTiming !== null ? `${worstTiming.toFixed(1)}°` : '—'}</span>
-                  <span>{timingSeries.length} sampled buckets</span>
-                </div>
-              </>
-            ) : (
-              <InsetCard className="flex min-h-[240px] items-center justify-center text-center">
-                <div className="space-y-2">
-                  <p className="text-sm font-medium app-heading">Timing map will appear after analysis</p>
-                  <p className="text-sm app-muted">Logs with timing correction columns surface an RPM-based pull curve here.</p>
-                </div>
-              </InsetCard>
-            )}
-          </ChartCard>
+            </div>
+          </SurfaceSection>
         </div>
       </div>
+    </motion.div>
+  );
+}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <SurfaceCard>
-          <SectionTitle icon={ShieldCheck} title="Health Score" subtitle="Confidence snapshot across your latest sessions." />
-          <div className="mt-5">
-            <p className="text-[2.2rem] font-semibold tracking-[-0.04em] app-heading">{averageHealthScore ?? '—'}</p>
-            <p className="mt-2 text-sm app-muted">Average of your recent analyzed pulls.</p>
-          </div>
-        </SurfaceCard>
+export default function Dashboard() {
+  const [activeView, setActiveView] = useState('dashboard');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterActive, setFilterActive] = useState(false);
+  const [snapshot, setSnapshot] = useState(loadSnapshot);
 
-        <SurfaceCard>
-          <SectionTitle icon={Flame} title="AFR Floor" subtitle="Leanest meaningful AFR from the current snapshot." />
-          <div className="mt-5">
-            <p className="text-[2.2rem] font-semibold tracking-[-0.04em] app-heading">{mostRecentLog?.afr ?? '—'}</p>
-            <p className="mt-2 text-sm app-muted">Based on the most recent saved analysis.</p>
-          </div>
-        </SurfaceCard>
+  const analyzerUploadRef = useRef(null);
+  const analyzerCompareRef = useRef(null);
+  const viewerUploadRef = useRef(null);
 
-        <SurfaceCard>
-          <SectionTitle icon={FileText} title="Recent Logs" subtitle="How much fresh data is feeding the control center." />
-          <div className="mt-5">
-            <p className="text-[2.2rem] font-semibold tracking-[-0.04em] app-heading">{recentLogs.length}</p>
-            <p className="mt-2 text-sm app-muted">Saved pulls ready to reopen in the analyzer.</p>
-          </div>
-        </SurfaceCard>
+  const [carDetails, setCarDetails] = useState(() => {
+    const activeId = getActiveCar();
+    if (activeId) {
+      const car = getCarProfiles().find((p) => p.id === activeId);
+      if (car) return { ethanol: car.ethanol ?? '', engine: car.engine || '', tuneStage: car.tuneStage || '' };
+    }
+    return analyzerDefaults;
+  });
+  const [analysisState, setAnalysisState] = useState({
+    analysis: null,
+    csvText: '',
+    compareAnalysis: null,
+    loading: false,
+    error: null,
+  });
+  const [viewerSource, setViewerSource] = useState({ csvText: '', filename: '' });
+  const [viewerData, setViewerData] = useState(null);
+  const [selectedChannels, setSelectedChannels] = useState(new Set());
+
+  const refreshSnapshot = useCallback(() => {
+    setSnapshot(loadSnapshot());
+  }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const { theme } = snapshot.settings;
+
+    function applyTheme() {
+      if (theme === 'dark') {
+        root.classList.add('dark');
+      } else if (theme === 'light') {
+        root.classList.remove('dark');
+      } else {
+        root.classList.toggle('dark', window.matchMedia('(prefers-color-scheme: dark)').matches);
+      }
+    }
+
+    applyTheme();
+
+    if (theme === 'system') {
+      const mql = window.matchMedia('(prefers-color-scheme: dark)');
+      mql.addEventListener('change', applyTheme);
+      return () => mql.removeEventListener('change', applyTheme);
+    }
+  }, [snapshot.settings]);
+
+  useEffect(() => {
+    if (!viewerSource.csvText) return;
+    try {
+      const payload = buildViewerPayload(viewerSource.csvText, viewerSource.filename, snapshot.settings);
+      setViewerData(payload);
+      setSelectedChannels((current) => {
+        if (current.size === 0) return new Set(payload.autoSelected);
+        const next = new Set([...current].filter((channel) => payload.numericChannels.includes(channel)));
+        return next.size ? next : new Set(payload.autoSelected);
+      });
+    } catch (caughtError) {
+      setViewerData(null);
+      setSelectedChannels(new Set());
+    }
+  }, [viewerSource, snapshot.settings]);
+
+  const openAnalyzerUpload = () => {
+    startTransition(() => {
+      setActiveView('analyzer');
+      setSearchQuery('');
+      setFilterActive(false);
+    });
+    analyzerUploadRef.current?.click();
+  };
+
+  const handleAnalyzeFile = async (file, options = {}) => {
+    if (!file) return;
+    const { compare = false } = options;
+    setAnalysisState((current) => ({ ...current, loading: true, error: null }));
+    startTransition(() => setActiveView('analyzer'));
+    try {
+      const csvText = await readFileAsText(file);
+      const analysis = analyzeLog(csvText, file.name, carDetails);
+      if (compare) {
+        setAnalysisState((current) => ({ ...current, compareAnalysis: analysis, loading: false }));
+      } else {
+        saveRecentLog(analysis);
+        saveGarageLog(analysis, csvText);
+        setAnalysisState({
+          analysis,
+          csvText,
+          compareAnalysis: null,
+          loading: false,
+          error: null,
+        });
+        refreshSnapshot();
+      }
+    } catch (caughtError) {
+      setAnalysisState((current) => ({
+        ...current,
+        loading: false,
+        error: caughtError instanceof Error ? caughtError.message : 'Could not analyze that log.',
+      }));
+    }
+  };
+
+  const handleViewerFile = async (file) => {
+    if (!file) return;
+    try {
+      const csvText = await readFileAsText(file);
+      setViewerSource({ csvText, filename: file.name });
+      startTransition(() => {
+        setActiveView('viewer');
+        setSearchQuery('');
+        setFilterActive(false);
+      });
+    } catch {
+      setViewerData(null);
+      setSelectedChannels(new Set());
+    }
+  };
+
+  const openAnalysisFromId = (id) => {
+    const payload = getLogResult(id);
+    if (!payload?.analysis) return;
+    setAnalysisState({
+      analysis: payload.analysis,
+      csvText: payload.csvText || '',
+      compareAnalysis: null,
+      loading: false,
+      error: null,
+    });
+    startTransition(() => setActiveView('analyzer'));
+  };
+
+  const openViewerFromId = (id) => {
+    const payload = getLogResult(id);
+    if (!payload?.csvText) return;
+    setViewerSource({
+      csvText: payload.csvText,
+      filename: payload.analysis?.filename || 'garage-log.csv',
+    });
+    startTransition(() => setActiveView('viewer'));
+  };
+
+  const handleSettingChange = (key, value) => {
+    saveSetting(key, value);
+    refreshSnapshot();
+  };
+
+  const activeLineWidth = LINE_WIDTH_MAP[snapshot.settings.lineThickness] ?? 1.5;
+
+  return (
+    <motion.div
+      initial="hidden"
+      animate="show"
+      variants={containerVariants}
+      className="flex min-h-screen flex-col overflow-hidden bg-[var(--bg-page)] md:h-screen md:flex-row"
+    >
+      <input
+        ref={analyzerUploadRef}
+        type="file"
+        accept=".csv,text/csv,text/plain"
+        className="hidden"
+        onChange={(event) => {
+          if (event.target.files?.[0]) handleAnalyzeFile(event.target.files[0]);
+          event.target.value = '';
+        }}
+      />
+      <input
+        ref={analyzerCompareRef}
+        type="file"
+        accept=".csv,text/csv,text/plain"
+        className="hidden"
+        onChange={(event) => {
+          if (event.target.files?.[0]) handleAnalyzeFile(event.target.files[0], { compare: true });
+          event.target.value = '';
+        }}
+      />
+      <input
+        ref={viewerUploadRef}
+        type="file"
+        accept=".csv,text/csv,text/plain"
+        className="hidden"
+        onChange={(event) => {
+          if (event.target.files?.[0]) handleViewerFile(event.target.files[0]);
+          event.target.value = '';
+        }}
+      />
+
+      <Sidebar activeView={activeView} onSelect={(view) => { setActiveView(view); setSearchQuery(''); setFilterActive(false); }} snapshot={snapshot} />
+
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <Topbar
+          activeView={activeView}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          filterActive={filterActive}
+          onToggleFilter={() => setFilterActive((current) => !current)}
+          onUpload={activeView === 'viewer' ? () => viewerUploadRef.current?.click() : openAnalyzerUpload}
+        />
+        {activeView === 'dashboard' ? <StatsStrip snapshot={snapshot} /> : null}
+
+        {activeView === 'dashboard' ? (
+          <DashboardOverview
+            snapshot={snapshot}
+            searchQuery={searchQuery}
+            filterActive={filterActive}
+            onOpenAnalysis={openAnalysisFromId}
+            onOpenGarage={openAnalysisFromId}
+            onOpenCalculator={() => setActiveView('calculator')}
+          />
+        ) : null}
+
+        {activeView === 'analyzer' ? (
+          <AnalyzerWorkspace
+            carDetails={carDetails}
+            onCarDetailsChange={(key, value) => setCarDetails((current) => ({ ...current, [key]: value }))}
+            analysisState={analysisState}
+            onUpload={openAnalyzerUpload}
+            onCompareUpload={() => analyzerCompareRef.current?.click()}
+            onReset={() => setAnalysisState({ analysis: null, csvText: '', compareAnalysis: null, loading: false, error: null })}
+            onOpenViewer={() => {
+              if (!analysisState.csvText) return;
+              setViewerSource({ csvText: analysisState.csvText, filename: analysisState.analysis?.filename || 'analyzed-log.csv' });
+              startTransition(() => setActiveView('viewer'));
+            }}
+            searchQuery={searchQuery}
+            filterActive={filterActive}
+          />
+        ) : null}
+
+        {activeView === 'viewer' ? (
+          <ViewerWorkspace
+            viewerData={viewerData}
+            selectedChannels={selectedChannels}
+            onToggleChannel={(channel) => setSelectedChannels((current) => {
+              const next = new Set(current);
+              if (next.has(channel)) next.delete(channel);
+              else next.add(channel);
+              return next;
+            })}
+            onUpload={() => viewerUploadRef.current?.click()}
+            onSetChannels={(channels) => setSelectedChannels(channels)}
+            searchQuery={searchQuery}
+            filterActive={filterActive}
+            lineWidth={activeLineWidth}
+          />
+        ) : null}
+
+        {activeView === 'calculator' ? (
+          <CalculatorWorkspace snapshot={snapshot} onSnapshotRefresh={refreshSnapshot} searchQuery={searchQuery} />
+        ) : null}
+
+        {activeView === 'garage' ? (
+          <GarageWorkspace
+            snapshot={snapshot}
+            onSnapshotRefresh={refreshSnapshot}
+            onAnalyzeWithCar={(car) => {
+              setCarDetails({ ethanol: car.ethanol ?? '', engine: car.engine || '', tuneStage: car.tuneStage || '' });
+              setActiveView('analyzer');
+            }}
+          />
+        ) : null}
+
+        {activeView === 'archive' ? (
+          <ArchiveWorkspace
+            snapshot={snapshot}
+            onSnapshotRefresh={refreshSnapshot}
+            searchQuery={searchQuery}
+            filterActive={filterActive}
+            onOpenAnalysis={openAnalysisFromId}
+            onOpenViewer={openViewerFromId}
+            carProfiles={getCarProfiles()}
+          />
+        ) : null}
+
+        {activeView === 'updates' ? (
+          <UpdateLogWorkspace searchQuery={searchQuery} />
+        ) : null}
+
+        {activeView === 'settings' ? (
+          <SettingsWorkspace snapshot={snapshot} onSettingChange={handleSettingChange} onSnapshotRefresh={refreshSnapshot} searchQuery={searchQuery} />
+        ) : null}
       </div>
-    </div>
+    </motion.div>
   );
 }

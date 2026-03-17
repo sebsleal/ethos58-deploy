@@ -1,5 +1,33 @@
 [
   {
+    "version": "2.4.0",
+    "date": "2026-03-16",
+    "title": "Garage QOL + Active Car Pre-fill",
+    "changes": [
+      { "type": "new", "platform": "both", "text": "Set any saved car as 'Active' — the Analyzer dropdowns auto-populate with that car's engine, tune stage, and fuel blend on every upload" },
+      { "type": "new", "platform": "both", "text": "Each car card now has an 'Analyze' button that pre-fills the analyzer settings for that car and navigates directly to the Analyzer tab" },
+      { "type": "new", "platform": "both", "text": "Car cards show a log count and most recent health score pulled from the Archive, matching on engine, tune stage, and ethanol blend" },
+      { "type": "new", "platform": "both", "text": "Archive tab now shows car filter pills — click a saved car nickname to filter the log list to entries that match that car's specs" }
+    ]
+  },
+  {
+    "version": "2.3.0",
+    "date": "2026-03-16",
+    "title": "Ethos Redesign + Workspace Restore",
+    "changes": [
+      { "type": "new", "platform": "both", "text": "Full app redesign with a cleaner layout and updated visual style" },
+      { "type": "new", "platform": "both", "text": "Restored the core product workflows inside the redesigned shell: Log Analyzer, Log Viewer, Blend Lab, Garage archive, and Settings are now available again from the unified navigation" },
+      { "type": "new", "platform": "both", "text": "Analyzer uploads now run the existing safety-analysis pipeline again, including AFR/HPFP/IAT/timing diagnostics, key points, compare overlays, and saved session history" },
+      { "type": "new", "platform": "both", "text": "Viewer uploads are functional again with automatic channel detection, normalized multi-series charting, searchable channel selection, and brush-based telemetry review" },
+      { "type": "new", "platform": "both", "text": "Blend tools are fully wired back up, including active-blend saving, reverse refuel math, pump calibration, fill-cost estimates, multi-tank planning, saved profiles, and station presets" },
+      { "type": "new", "platform": "both", "text": "Garage archive management is live again with reopen-in-analyzer, reopen-in-viewer, editable tags and notes, CSV/JSON export, and JSON import support" },
+      { "type": "improved", "platform": "both", "text": "Settings now control the rebuilt interface directly, including live theme switching, unit preferences, and viewer rendering options carried through the new workspace shell" },
+      { "type": "fixed", "platform": "both", "text": "Synced the in-app version constant with the changelog so the Update Log surfaces the current release correctly" },
+      { "type": "fixed", "platform": "both", "text": "Patched the new theme system so saved light/dark preferences affect the redesigned interface visually instead of only persisting in storage" },
+      { "type": "improved", "platform": "both", "text": "Completed a verification pass after the rebuild: production build succeeds and the existing parser, compare, storage, and blend-math tests remain green" }
+    ]
+  },
+  {
     "version": "2.2.0",
     "date": "2026-03-13",
     "title": "SaaS Redesign + iOS Status Bar & Haptics Fixes",

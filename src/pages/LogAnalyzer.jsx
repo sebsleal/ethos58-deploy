@@ -17,7 +17,7 @@ import {
 } from 'recharts';
 
 const ETHANOL_OPTIONS = [0, 10, 30, 40, 50, 85];
-const ENGINE_OPTIONS = ['B58 Gen1', 'B58 Gen2', 'S58', 'N55', 'N54', 'Other'];
+const ENGINE_OPTIONS = ['B58 Gen1', 'B58 Gen2', 'S58', 'S55', 'N55', 'N54', 'N20/N26', 'B48', 'N63/S63', 'Other'];
 const TUNE_OPTIONS = ['Stage 1', 'Stage 2', 'Stage 2+', 'Custom E-tune'];
 const FORMAT_COLOR = {
   BM3: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
@@ -60,7 +60,7 @@ function BoostWarningDot(props) {
 
 const LogAnalyzer = () => {
   const location = useLocation();
-  const [carDetails, setCarDetails] = useState({ ethanol: 10, engine: 'B58 Gen1', tuneStage: 'Stage 1' });
+  const [carDetails, setCarDetails] = useState({ ethanol: null, engine: '', tuneStage: '' });
   const [dragActive, setDragActive] = useState(false);
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState(null);
@@ -485,6 +485,7 @@ const LogAnalyzer = () => {
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide app-muted">Engine</label>
                 <select value={carDetails.engine} onChange={e => setCarDetails(prev => ({ ...prev, engine: e.target.value }))}
                   className="app-input w-full px-3 py-2 text-sm">
+                  <option value="">Select</option>
                   {ENGINE_OPTIONS.map(o => <option key={o}>{o}</option>)}
                 </select>
               </div>
@@ -492,6 +493,7 @@ const LogAnalyzer = () => {
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide app-muted">Tune Stage</label>
                 <select value={carDetails.tuneStage} onChange={e => setCarDetails(prev => ({ ...prev, tuneStage: e.target.value }))}
                   className="app-input w-full px-3 py-2 text-sm">
+                  <option value="">Select</option>
                   {TUNE_OPTIONS.map(o => <option key={o}>{o}</option>)}
                 </select>
               </div>

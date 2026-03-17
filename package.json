@@ -28,6 +28,7 @@
     "cors": "^2.8.6",
     "csv-parse": "^6.1.0",
     "express": "^5.2.1",
+    "framer-motion": "^12.37.0",
     "html2canvas": "^1.4.1",
     "lucide-react": "^0.344.0",
     "multer": "^2.0.2",
@@ -43,6 +44,7 @@
     "concurrently": "^9.2.1",
     "nodemon": "^3.1.14",
     "postcss": "^8.4.35",
+    "sharp": "^0.34.5",
     "tailwindcss": "^3.4.1",
     "typescript": "^5.9.3",
     "vite": "^5.1.4"
