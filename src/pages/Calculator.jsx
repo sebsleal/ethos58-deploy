@@ -21,7 +21,7 @@ import {
 import { trackEvent, trackError } from '../utils/telemetry';
 import { hapticSuccess, hapticWarning, hapticError, hapticLight } from '../utils/haptics';
 import { Droplet, AlertTriangle, BookmarkPlus, Bookmark, Trash2, RotateCcw, MapPin, Star, ChevronDown, Calculator as CalculatorIcon, Route, History, X, Zap } from 'lucide-react';
-import { PageHeader } from '../components/ui';
+import { PageHeader, useToast } from '../components/ui';
 
 const LITERS_PER_GALLON = 3.78541;
 
@@ -33,6 +33,7 @@ function roundTo(value, decimals = 2) {
 }
 
 const Calculator = () => {
+  const { toast } = useToast();
   const [settings] = useState(getSettings);
   const [plannerDefaults] = useState(getFuelPlannerDefaults);
   const [mode, setMode] = useState('blend'); // 'blend' | 'refuel' | 'planner'
@@ -267,8 +268,13 @@ const Calculator = () => {
       saveActiveBlend(mapped);
       setResult(mapped);
       setBlendHistory(getBlendHistory());
-      if (mapped.warnings?.length) hapticWarning();
-      else hapticSuccess();
+      if (mapped.warnings?.length) {
+        hapticWarning();
+        toast(`E${mapped.resultingBlend} blend calculated — check warnings below.`, { variant: 'warn' });
+      } else {
+        hapticSuccess();
+        toast(`E${mapped.resultingBlend} blend calculated successfully.`, { variant: 'success' });
+      }
       trackEvent('blend_calculation_succeeded', {
         current_fuel: formData.currentFuel,
         current_e: formData.currentE,
@@ -279,6 +285,7 @@ const Calculator = () => {
     } catch (err) {
       setError(err.message);
       hapticError();
+      toast(err.message, { variant: 'error' });
       trackError('blend_calculation_failed', err, { current_fuel: formData.currentFuel, target_e: formData.targetE });
     }
   };
@@ -300,6 +307,7 @@ const Calculator = () => {
     setProfiles(getBlendProfiles());
     setProfileName('');
     setShowProfileSave(false);
+    toast(`Profile "${profileName.trim()}" saved.`, { variant: 'success' });
   };
 
   const handleLoadProfile = (name) => {
@@ -317,6 +325,7 @@ const Calculator = () => {
     if (!window.confirm(`Delete the saved profile "${name}"?`)) return;
     deleteBlendProfile(name);
     setProfiles(getBlendProfiles());
+    toast(`Profile "${name}" deleted.`, { variant: 'info' });
   };
 
   const profileNames = Object.keys(profiles);
@@ -343,6 +352,7 @@ const Calculator = () => {
       pumpEthanol: calibratedPumpE ?? pumpEthanol,
     });
     setStationPresets(getStationPresets());
+    toast(`Station "${stationName.trim()}" saved.`, { variant: 'success' });
     setStationName('');
   };
 
@@ -521,7 +531,7 @@ const Calculator = () => {
             <div className="flex items-center gap-2">
               {blendHistory.length > 0 && (
                 <button
-                  onClick={() => { if (!window.confirm('Clear all blend history?')) return; clearBlendHistory(); setBlendHistory([]); }}
+                  onClick={() => { if (!window.confirm('Clear all blend history?')) return; clearBlendHistory(); setBlendHistory([]); toast('Blend history cleared.', { variant: 'info' }); }}
                   className="text-xs text-red-400 hover:text-red-600 transition-colors"
                 >
                   Clear all

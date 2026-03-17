@@ -99,6 +99,7 @@ import {
   clearBlendHistory,
 } from '../utils/storage';
 import { parseViewerCsv } from '../utils/viewerCsv';
+import { useToast } from '../components/ui';
 
 const containerVariants = {
   hidden: {},
@@ -1961,6 +1962,7 @@ function ViewerWorkspace({ viewerData, selectedChannels, onToggleChannel, onSetC
 }
 
 function CalculatorWorkspace({ snapshot, onSnapshotRefresh, searchQuery }) {
+  const { toast } = useToast();
   const [mode, setMode] = useState('blend');
   const [form, setForm] = useState({
     currentFuel: snapshot.activeBlend?.currentFuel ?? '',
@@ -2029,8 +2031,10 @@ function CalculatorWorkspace({ snapshot, onSnapshotRefresh, searchQuery }) {
       setBlendResult(payload);
       setBlendHistory(getBlendHistory());
       onSnapshotRefresh();
+      toast(`E${payload.resultingBlend} blend calculated successfully.`, { variant: 'success' });
     } catch (caughtError) {
       setError(caughtError.message);
+      toast(caughtError.message, { variant: 'error' });
     }
   };
 
@@ -2201,7 +2205,7 @@ function CalculatorWorkspace({ snapshot, onSnapshotRefresh, searchQuery }) {
                   <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] p-3 space-y-2">
                     <div className="flex items-center justify-between">
                       <p className="font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">Blend History</p>
-                      <button type="button" onClick={() => { if (!window.confirm('Clear all blend history?')) return; clearBlendHistory(); setBlendHistory([]); setShowHistory(false); }} className="text-[11px] text-[var(--danger-text)]">Clear all</button>
+                      <button type="button" onClick={() => { if (!window.confirm('Clear all blend history?')) return; clearBlendHistory(); setBlendHistory([]); setShowHistory(false); toast('Blend history cleared.', { variant: 'info' }); }} className="text-[11px] text-[var(--danger-text)]">Clear all</button>
                     </div>
                     <div className="space-y-1 max-h-48 overflow-y-auto">
                       {blendHistory.slice(0, 20).map((entry) => (
@@ -2418,6 +2422,7 @@ const CAR_ETHANOL_OPTIONS = [0, 10, 20, 30, 40, 50, 85, 100];
 const EMPTY_CAR_FORM = { nickname: '', year: '', model: '', engine: '', tuneStage: '', ethanol: '', tuner: '', notes: '' };
 
 function GarageWorkspace({ snapshot, onSnapshotRefresh, onAnalyzeWithCar }) {
+  const { toast } = useToast();
   const [profiles, setProfiles] = useState(() => getCarProfiles());
   const [activeCarId, setActiveCarId] = useState(() => getActiveCar());
   const [editing, setEditing] = useState(null); // null | 'new' | id string
@@ -2440,10 +2445,16 @@ function GarageWorkspace({ snapshot, onSnapshotRefresh, onAnalyzeWithCar }) {
     if (editing === 'new') saveCarProfile(form);
     else updateCarProfile(editing, form);
     refresh();
+    toast(`${form.nickname.trim()} saved.`, { variant: 'success' });
     cancel();
   };
 
-  const remove = (id) => { deleteCarProfile(id); refresh(); };
+  const remove = (id) => {
+    const profile = profiles.find((p) => p.id === id);
+    deleteCarProfile(id);
+    refresh();
+    toast(`${profile?.nickname || 'Car'} deleted.`, { variant: 'info' });
+  };
 
   const field = (key) => ({ value: form[key], onChange: (e) => setForm((f) => ({ ...f, [key]: e.target.value })) });
 
@@ -2599,6 +2610,7 @@ function GarageWorkspace({ snapshot, onSnapshotRefresh, onAnalyzeWithCar }) {
 }
 
 function ArchiveWorkspace({ snapshot, onSnapshotRefresh, searchQuery, filterActive, onOpenAnalysis, onOpenViewer, carProfiles = [] }) {
+  const { toast } = useToast();
   const importRef = useRef(null);
   const [tagFilter, setTagFilter] = useState('all');
   const [carFilter, setCarFilter] = useState(null);
@@ -2634,8 +2646,11 @@ function ArchiveWorkspace({ snapshot, onSnapshotRefresh, searchQuery, filterActi
       const text = await file.text();
       importGarageBackup(JSON.parse(text), 'merge');
       onSnapshotRefresh();
+      toast('Garage backup imported successfully.', { variant: 'success' });
     } catch (caughtError) {
-      setImportError(caughtError instanceof Error ? caughtError.message : 'Could not import that backup file.');
+      const msg = caughtError instanceof Error ? caughtError.message : 'Could not import that backup file.';
+      setImportError(msg);
+      toast(msg, { variant: 'error' });
     }
   };
 
@@ -2649,7 +2664,7 @@ function ArchiveWorkspace({ snapshot, onSnapshotRefresh, searchQuery, filterActi
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={() => downloadBlob(`ethos58-garage-summary-${Date.now()}.csv`, exportGarageSummaryCsv(), 'text/csv;charset=utf-8')}
+                onClick={() => { downloadBlob(`ethos58-garage-summary-${Date.now()}.csv`, exportGarageSummaryCsv(), 'text/csv;charset=utf-8'); toast('Summary CSV downloaded.', { variant: 'success' }); }}
                 className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-2 text-[11px] text-[var(--text-primary)]"
               >
                 <FileSpreadsheet size={12} className="mr-1 inline-block" />
@@ -2657,7 +2672,7 @@ function ArchiveWorkspace({ snapshot, onSnapshotRefresh, searchQuery, filterActi
               </button>
               <button
                 type="button"
-                onClick={() => downloadBlob(`ethos58-garage-${Date.now()}.json`, JSON.stringify(exportGarageBackup(), null, 2), 'application/json')}
+                onClick={() => { downloadBlob(`ethos58-garage-${Date.now()}.json`, JSON.stringify(exportGarageBackup(), null, 2), 'application/json'); toast('Backup JSON downloaded.', { variant: 'success' }); }}
                 className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-2 text-[11px] text-[var(--text-primary)]"
               >
                 <FileJson size={12} className="mr-1 inline-block" />
@@ -2768,6 +2783,7 @@ function ArchiveWorkspace({ snapshot, onSnapshotRefresh, searchQuery, filterActi
                       if (!window.confirm(`Delete ${log.filename} from the garage?`)) return;
                       deleteGarageLog(log.id);
                       onSnapshotRefresh();
+                      toast(`${log.filename} deleted.`, { variant: 'info' });
                     }}
                     className="w-full rounded-[8px] border border-[rgba(224,81,58,0.3)] bg-[rgba(224,81,58,0.06)] px-3 py-2 text-[12px] text-[var(--danger-text)]"
                   >
@@ -3044,6 +3060,7 @@ function CompareWorkspace({ garageLogs }) {
 }
 
 export default function Dashboard() {
+  const { toast } = useToast();
   const [activeView, setActiveView] = useState('dashboard');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterActive, setFilterActive] = useState(false);
@@ -3134,6 +3151,7 @@ export default function Dashboard() {
       const analysis = analyzeLog(csvText, file.name, carDetails);
       if (compare) {
         setAnalysisState((current) => ({ ...current, compareAnalysis: analysis, loading: false }));
+        toast(`Compare log loaded: ${file.name}`, { variant: 'info' });
       } else {
         saveRecentLog(analysis);
         saveGarageLog(analysis, csvText);
@@ -3145,13 +3163,17 @@ export default function Dashboard() {
           error: null,
         });
         refreshSnapshot();
+        const statusVariant = analysis.status === 'Risk' ? 'error' : analysis.status === 'Caution' ? 'warn' : 'success';
+        toast(`${file.name} analyzed — ${analysis.status}`, { variant: statusVariant });
       }
     } catch (caughtError) {
+      const msg = caughtError instanceof Error ? caughtError.message : 'Could not analyze that log.';
       setAnalysisState((current) => ({
         ...current,
         loading: false,
-        error: caughtError instanceof Error ? caughtError.message : 'Could not analyze that log.',
+        error: msg,
       }));
+      toast(msg, { variant: 'error' });
     }
   };
 
@@ -3165,9 +3187,11 @@ export default function Dashboard() {
         setSearchQuery('');
         setFilterActive(false);
       });
+      toast(`${file.name} opened in viewer.`, { variant: 'info' });
     } catch {
       setViewerData(null);
       setSelectedChannels(new Set());
+      toast('Could not open that CSV file.', { variant: 'error' });
     }
   };
 
