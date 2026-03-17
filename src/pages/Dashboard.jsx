@@ -2923,7 +2923,7 @@ function CompareWorkspace({ garageLogs }) {
     { label: 'AFR', left: formatMetricLocal(leftResult.metrics?.afr?.actual, ':1', 2), right: formatMetricLocal(rightResult.metrics?.afr?.actual, ':1', 2) },
     { label: 'HPFP drop', left: formatMetricLocal(leftResult.metrics?.hpfp?.max_drop_pct, '%'), right: formatMetricLocal(rightResult.metrics?.hpfp?.max_drop_pct, '%'), diff: metricDiff(leftResult.metrics?.hpfp?.max_drop_pct, rightResult.metrics?.hpfp?.max_drop_pct, true) },
     { label: 'IAT peak', left: formatMetricLocal(leftResult.metrics?.iat?.peak_f, 'F', 0), right: formatMetricLocal(rightResult.metrics?.iat?.peak_f, 'F', 0), diff: metricDiff(leftResult.metrics?.iat?.peak_f, rightResult.metrics?.iat?.peak_f, true) },
-    { label: 'Timing pull', left: formatMetricLocal(leftResult.metrics?.timingCorrections?.max_correction, ' deg'), right: formatMetricLocal(rightResult.metrics?.timingCorrections?.max_correction, ' deg'), diff: metricDiff(leftResult.metrics?.timingCorrections?.max_correction, rightResult.metrics?.timingCorrections?.max_correction, true) },
+    { label: 'Timing pull', left: formatMetricLocal(leftResult.metrics?.timingCorrections?.max_correction, ' deg'), right: formatMetricLocal(rightResult.metrics?.timingCorrections?.max_correction, ' deg'), diff: metricDiff(leftResult.metrics?.timingCorrections?.max_correction, rightResult.metrics?.timingCorrections?.max_correction, false) },
     { label: 'Health score', left: formatMetricLocal(leftResult.healthScore, '%', 0), right: formatMetricLocal(rightResult.healthScore, '%', 0), diff: metricDiff(leftResult.healthScore, rightResult.healthScore, false) },
   ] : [];
 
