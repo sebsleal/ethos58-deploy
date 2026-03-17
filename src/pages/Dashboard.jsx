@@ -64,6 +64,8 @@ import {
 import { mergeCompareChartData } from '../utils/logCompare';
 import {
   deleteBlendProfile,
+  clearGarageLogs,
+  clearRecentLogs,
   deleteGarageLog,
   deleteStationPreset,
   exportGarageBackup,
@@ -2488,13 +2490,23 @@ function SettingsWorkspace({ snapshot, onSettingChange, onSnapshotRefresh, searc
                 type="button"
                 onClick={() => {
                   if (!window.confirm('Clear all recent logs? This cannot be undone.')) return;
-                  localStorage.removeItem('ethos_recent_logs');
-                  localStorage.removeItem('ethos_log_results');
+                  clearRecentLogs();
                   onSnapshotRefresh();
                 }}
                 className="rounded-[8px] border border-[rgba(224,81,58,0.3)] bg-[rgba(224,81,58,0.06)] px-3 py-2 text-[12px] text-[var(--danger-text)] transition-colors hover:bg-[rgba(224,81,58,0.1)]"
               >
                 Clear recent logs
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!window.confirm('Clear all garage logs? This cannot be undone.')) return;
+                  clearGarageLogs();
+                  onSnapshotRefresh();
+                }}
+                className="rounded-[8px] border border-[rgba(224,81,58,0.3)] bg-[rgba(224,81,58,0.06)] px-3 py-2 text-[12px] text-[var(--danger-text)] transition-colors hover:bg-[rgba(224,81,58,0.1)]"
+              >
+                Clear garage logs
               </button>
             </div>
           </SurfaceSection>
