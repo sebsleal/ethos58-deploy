@@ -1008,7 +1008,7 @@ function StatsStrip({ snapshot }) {
         <NumericStat label="Flagged pulls" target={flaggedCount} detail={`${snapshot.recentLogs.length} recent sessions tracked`} />
       </div>
       <div className="pt-5 md:pl-6 md:pt-0">
-        <NumericStat label="Garage logs" target={garageCount} detail={`${Object.keys(snapshot.profiles).length} saved fuel profiles`} />
+        <NumericStat label="Archived logs" target={garageCount} detail={`${Object.keys(snapshot.profiles).length} saved fuel profiles`} />
       </div>
     </motion.div>
   );
@@ -2392,7 +2392,7 @@ function ArchiveWorkspace({ snapshot, onSnapshotRefresh, searchQuery, filterActi
               </div>
             </SurfaceSection>
           )) : (
-            <EmptyState icon={FolderArchive} title="No garage logs match" body="Upload and analyze a log, or clear the current search and filter state to reveal archived entries." />
+            <EmptyState icon={FolderArchive} title="No archived logs match" body="Upload and analyze a log, or clear the current search and filter state to reveal archived entries." />
           )}
         </div>
       </div>
@@ -2474,7 +2474,7 @@ function SettingsWorkspace({ snapshot, onSettingChange, onSnapshotRefresh, searc
                 <p className="mt-2 text-[22px] font-light text-[var(--text-primary)]">{snapshot.recentLogs.length}</p>
               </div>
               <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-3">
-                <p className="font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">Garage logs</p>
+                <p className="font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">Archived logs</p>
                 <p className="mt-2 text-[22px] font-light text-[var(--text-primary)]">{snapshot.garageLogs.length}</p>
               </div>
               <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-3">
