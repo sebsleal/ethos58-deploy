@@ -2485,7 +2485,7 @@ function SettingsWorkspace({ snapshot, onSettingChange, onSnapshotRefresh, searc
           </SurfaceSection>
 
           <SurfaceSection title="Data management" subtitle="Clear stored data from this device. This cannot be undone.">
-            <div className="space-y-2">
+            <div className="flex gap-3">
               <button
                 type="button"
                 onClick={() => {
@@ -2500,13 +2500,13 @@ function SettingsWorkspace({ snapshot, onSettingChange, onSnapshotRefresh, searc
               <button
                 type="button"
                 onClick={() => {
-                  if (!window.confirm('Clear all garage logs? This cannot be undone.')) return;
+                  if (!window.confirm('Clear all archive logs? This cannot be undone.')) return;
                   clearGarageLogs();
                   onSnapshotRefresh();
                 }}
                 className="rounded-[8px] border border-[rgba(224,81,58,0.3)] bg-[rgba(224,81,58,0.06)] px-3 py-2 text-[12px] text-[var(--danger-text)] transition-colors hover:bg-[rgba(224,81,58,0.1)]"
               >
-                Clear garage logs
+                Clear archive
               </button>
             </div>
           </SurfaceSection>
