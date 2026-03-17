@@ -94,6 +94,9 @@ import {
   getActiveCar,
   setActiveCar,
   setPendingBlend,
+  getBlendHistory,
+  saveBlendHistory,
+  clearBlendHistory,
 } from '../utils/storage';
 import { parseViewerCsv } from '../utils/viewerCsv';
 
@@ -1981,6 +1984,8 @@ function CalculatorWorkspace({ snapshot, onSnapshotRefresh, searchQuery }) {
   const [costResult, setCostResult] = useState(null);
   const [tankPlan, setTankPlan] = useState([]);
   const [error, setError] = useState(null);
+  const [blendHistory, setBlendHistory] = useState(getBlendHistory);
+  const [showHistory, setShowHistory] = useState(false);
   const [currentFuelUnit, setCurrentFuelUnit] = useState(() => (snapshot.settings.units === 'Metric' ? 'L' : 'gal'));
   const units = snapshot.settings.units;
   const filteredSearch = searchQuery.trim().toLowerCase();
@@ -2020,7 +2025,9 @@ function CalculatorWorkspace({ snapshot, onSnapshotRefresh, searchQuery }) {
         pumpGallons: result.gallons_of_93_to_add,
       };
       saveActiveBlend(payload);
+      saveBlendHistory({ e85Gallons: payload.e85Gallons, pumpGallons: payload.pumpGallons, targetE: payload.targetE, resultingBlend: payload.resultingBlend });
       setBlendResult(payload);
+      setBlendHistory(getBlendHistory());
       onSnapshotRefresh();
     } catch (caughtError) {
       setError(caughtError.message);
@@ -2184,7 +2191,28 @@ function CalculatorWorkspace({ snapshot, onSnapshotRefresh, searchQuery }) {
                     onChange={(event) => setField('profileName', event.target.value)}
                     className="mt-0 max-w-[180px]"
                   />
+                  {blendHistory.length > 0 && (
+                    <button type="button" onClick={() => setShowHistory((v) => !v)} className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-2 text-[12px] text-[var(--text-primary)]">
+                      History ({blendHistory.length})
+                    </button>
+                  )}
                 </div>
+                {showHistory && (
+                  <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-muted)] p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)]">Blend History</p>
+                      <button type="button" onClick={() => { if (!window.confirm('Clear all blend history?')) return; clearBlendHistory(); setBlendHistory([]); setShowHistory(false); }} className="text-[11px] text-[var(--danger-text)]">Clear all</button>
+                    </div>
+                    <div className="space-y-1 max-h-48 overflow-y-auto">
+                      {blendHistory.slice(0, 20).map((entry) => (
+                        <div key={entry.id} className="flex items-center justify-between gap-2 text-[11px] text-[var(--text-secondary)]">
+                          <span>{formatVolume(entry.e85Gallons, units)} E85 + {formatVolume(entry.pumpGallons, units)} pump → E{entry.resultingBlend}</span>
+                          <span className="text-[var(--text-muted)] shrink-0">{new Date(entry.date).toLocaleDateString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : null}
 
@@ -2268,6 +2296,25 @@ function CalculatorWorkspace({ snapshot, onSnapshotRefresh, searchQuery }) {
                       ))}
                     </div>
                   ) : null}
+                  {(() => {
+                    const totalGal = (Number(blendResult.e85Gallons) || 0) + (Number(blendResult.pumpGallons) || 0);
+                    if (totalGal <= 0) return null;
+                    const e85Pct = ((Number(blendResult.e85Gallons) || 0) / totalGal) * 100;
+                    const pumpPct = 100 - e85Pct;
+                    return (
+                      <div>
+                        <p className="font-mono text-[10px] uppercase tracking-[0.07em] text-[var(--text-muted)] mb-2">Blend composition</p>
+                        <div className="flex rounded-[6px] overflow-hidden h-7" title={`E85: ${e85Pct.toFixed(1)}% | Pump: ${pumpPct.toFixed(1)}%`}>
+                          <div className="flex items-center justify-center text-[10px] font-medium text-white transition-all duration-500" style={{ width: `${e85Pct}%`, backgroundColor: '#e8a63a', minWidth: e85Pct > 5 ? undefined : 0 }}>
+                            {e85Pct > 12 ? `E85 ${e85Pct.toFixed(0)}%` : ''}
+                          </div>
+                          <div className="flex items-center justify-center text-[10px] font-medium text-white transition-all duration-500" style={{ width: `${pumpPct}%`, backgroundColor: '#6b7280' }}>
+                            {pumpPct > 12 ? `Pump ${pumpPct.toFixed(0)}%` : ''}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               ) : null}
 
