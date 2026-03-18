@@ -66,6 +66,7 @@ import {
 } from '../utils/blendMath';
 import { mergeCompareChartData } from '../utils/logCompare';
 import {
+  clearAllData,
   deleteBlendProfile,
   clearGarageLogs,
   clearRecentLogs,
@@ -2811,7 +2812,7 @@ function ArchiveWorkspace({ snapshot, onSnapshotRefresh, searchQuery, filterActi
   );
 }
 
-function SettingsWorkspace({ snapshot, onSettingChange, onSnapshotRefresh, searchQuery }) {
+function SettingsWorkspace({ snapshot, onSettingChange, onSnapshotRefresh, onClearData, searchQuery }) {
   const deferredSearch = useDeferredValue(searchQuery);
   const matches = (text) => !deferredSearch || text.toLowerCase().includes(deferredSearch.toLowerCase());
 
@@ -2896,7 +2897,7 @@ function SettingsWorkspace({ snapshot, onSettingChange, onSnapshotRefresh, searc
           </SurfaceSection>
 
           <SurfaceSection title="Data management" subtitle="Clear stored data from this device. This cannot be undone.">
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
               <button
                 type="button"
                 onClick={() => {
@@ -2918,6 +2919,13 @@ function SettingsWorkspace({ snapshot, onSettingChange, onSnapshotRefresh, searc
                 className="rounded-[8px] border border-[rgba(224,81,58,0.3)] bg-[rgba(224,81,58,0.06)] px-3 py-2 text-[12px] text-[var(--danger-text)] transition-colors hover:bg-[rgba(224,81,58,0.1)]"
               >
                 Clear archive
+              </button>
+              <button
+                type="button"
+                onClick={onClearData}
+                className="rounded-[8px] border border-[rgba(224,81,58,0.45)] bg-[rgba(224,81,58,0.12)] px-3 py-2 text-[12px] font-medium text-[var(--danger-text)] transition-colors hover:bg-[rgba(224,81,58,0.18)]"
+              >
+                Clear data
               </button>
             </div>
           </SurfaceSection>
@@ -3233,6 +3241,18 @@ export default function Dashboard() {
     refreshSnapshot();
   };
 
+  const handleClearData = useCallback(() => {
+    if (!window.confirm('Clear all local data? This removes settings, profiles, logs, and history. This cannot be undone.')) return;
+    clearAllData();
+    setAnalysisState({ analysis: null, csvText: '', compareAnalysis: null, loading: false, error: null });
+    setViewerSource({ csvText: '', filename: '' });
+    setViewerData(null);
+    setSelectedChannels(new Set());
+    setCarDetails(analyzerDefaults);
+    refreshSnapshot();
+    toast('All local data cleared.', { variant: 'info' });
+  }, [refreshSnapshot, toast]);
+
   const activeLineWidth = LINE_WIDTH_MAP[snapshot.settings.lineThickness] ?? 1.5;
 
   return (
@@ -3372,7 +3392,7 @@ export default function Dashboard() {
         ) : null}
 
         {activeView === 'settings' ? (
-          <SettingsWorkspace snapshot={snapshot} onSettingChange={handleSettingChange} onSnapshotRefresh={refreshSnapshot} searchQuery={searchQuery} />
+          <SettingsWorkspace snapshot={snapshot} onSettingChange={handleSettingChange} onSnapshotRefresh={refreshSnapshot} onClearData={handleClearData} searchQuery={searchQuery} />
         ) : null}
       </div>
     </motion.div>

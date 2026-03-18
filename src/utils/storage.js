@@ -263,6 +263,22 @@ export function clearGarageLogs() {
   localStorage.removeItem(KEYS.LOG_GARAGE);
 }
 
+export function clearAllData() {
+  // Remove all known keys first.
+  Object.values(KEYS).forEach((key) => localStorage.removeItem(key));
+
+  // Remove dynamic analysis payloads and any future ethos-prefixed keys.
+  if (typeof localStorage.length === 'number' && typeof localStorage.key === 'function') {
+    const ethosKeys = [];
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (!key) continue;
+      if (key.startsWith('ethos_') || key === KEYS.THEME) ethosKeys.push(key);
+    }
+    ethosKeys.forEach((key) => localStorage.removeItem(key));
+  }
+}
+
 // ─── Active Blend ─────────────────────────────────────────────────────────────
 
 export function getActiveBlend() {

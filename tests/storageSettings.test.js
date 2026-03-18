@@ -1,10 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getSettings, saveSetting } from '../src/utils/storage.js';
+import { clearAllData, getSettings, saveSetting } from '../src/utils/storage.js';
 
 function createLocalStorageMock(seed = {}) {
   const store = new Map(Object.entries(seed));
   return {
+    get length() {
+      return store.size;
+    },
+    key(index) {
+      return Array.from(store.keys())[index] ?? null;
+    },
     getItem(key) {
       return store.has(key) ? store.get(key) : null;
     },
@@ -76,4 +82,24 @@ test('saveSetting persists setting payload and keeps legacy keys synchronized', 
   assert.equal(settings.timeFormat, 'Elapsed (Seconds)');
   assert.equal(storage.dump().theme, 'light');
   assert.equal(storage.dump().ethos_units, 'Metric');
+});
+
+test('clearAllData removes all ethos keys and legacy theme key', () => {
+  const storage = createLocalStorageMock({
+    ethos_settings: JSON.stringify({ theme: 'dark' }),
+    ethos_recent_logs: JSON.stringify([{ id: 1 }]),
+    ethos_log_results_1: JSON.stringify({ analysis: { status: 'Safe' } }),
+    theme: 'dark',
+    unrelated_key: 'keep-me',
+  });
+  global.localStorage = storage;
+
+  clearAllData();
+
+  const dumped = storage.dump();
+  assert.equal(dumped.ethos_settings, undefined);
+  assert.equal(dumped.ethos_recent_logs, undefined);
+  assert.equal(dumped.ethos_log_results_1, undefined);
+  assert.equal(dumped.theme, undefined);
+  assert.equal(dumped.unrelated_key, 'keep-me');
 });
